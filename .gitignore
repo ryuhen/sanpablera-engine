@@ -153,3 +153,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Modelos que el usuario baja a mano y NO se pueden redistribuir (Mixamo).
+# Los que sí tienen licencia permisiva van versionados en el repo.
+/assets/characters/*.local.glb

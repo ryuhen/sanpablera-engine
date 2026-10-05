@@ -1,0 +1,40 @@
+# SANPABLERA ENGINE - ESPECIFICACIONES DE JUGABILIDAD Y ARQUITECTURA
+
+## 1. Sistema de Controles Táctiles (UI de Botones)
+- **Distribución:** Layout limpio en los márgenes de la pantalla que **evita que los elementos se encimen o se monten unos sobre otros**.
+- **Pad Direccional:** 8 direcciones completas (Arriba, Abajo, Izquierda, Derecha y las 4 diagonales).
+- **Botones de Acción (4 independientes):**
+  1. Ataque 1 (Ligero / Rápido).
+  2. Ataque 2 (Fuerte / Pesado).
+  3. Guardia / Bloqueo.
+  4. Botón de Acción / Interacción especial.
+
+## 2. Sistema de Cámara Dinámica
+- **Comportamiento:** Sigue la acción de manera fluida en el espacio 3D de Babylon.js.
+- **Puntos de Enfoque Inteligentes:**
+  * Apunta dinámicamente al **Fighter 1** durante momentos de enfoque individual.
+  * Se desplaza automáticamente hacia el **punto medio exacto** entre el Fighter 1 y el Fighter 2 para mantener a ambos dentro del encuadre y de la distancia de combate.
+
+## 3. HUD (Interfaz de Usuario de Combate)
+- **Elementos Visibles en Pantalla:**
+  * Barras de vida dinámicas y en tiempo real para cada luchador.
+  * Indicadores de recursos, energía o barras especiales de combate.
+
+## 4. Máquina de Estados Finitos (FSM) Avanzada
+La FSM gestiona de forma estricta los siguientes estados y categorías de combate:
+- **Posiciones Base (4):** Aire, De pie (Normal), Agachado y Pecho tierra.
+- **Estados de Suelo (2):** Caído sobre la espalda y Caído sobre el pecho.
+- **Orientación respecto al Oponente:** 
+  * Con la cabeza hacia el oponente.
+  * Con los pies hacia el oponente.
+  * En un ángulo intermedio.
+- **Stances y Movilidad Especial:** 
+  * De rodillas.
+  * Cuadrúpeda.
+  * Tropezando o cayendo lentamente.
+- **Estados Aéreos y Juggle:** 
+  * Juggle aéreo.
+  * Lanzado fuertemente hacia atrás o hacia el aire.
+- **Niveles de Impacto (Hit Levels):** Bajo, Medio y Fuerte.
+- **Stances Propias del Peleador:** Posturas personalizadas por personaje que definen ataques y animaciones únicas.
+- **Variantes de Orientación Visual:** Las acciones de posición normal, agachado y salto cuentan con versiones explícitas diferenciadas según si el peleador da la **espalda a la cámara** o tiene el **frente hacia la cámara**.

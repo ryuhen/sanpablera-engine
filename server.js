@@ -13,7 +13,15 @@ const mimeTypes = {
     '.png': 'image/png',
     '.jpg': 'image/jpg',
     '.svg': 'image/svg+xml',
-    '.wasm': 'application/wasm'
+    '.wasm': 'application/wasm',
+    // Modelos 3D. Sin esto el navegador rechaza el .glb y el personaje
+    // humanoide no llega a cargar (ver assets/ATTRIBUTIONS.md).
+    '.glb': 'model/gltf-binary',
+    '.gltf': 'model/gltf+json',
+    '.bin': 'application/octet-stream',
+    '.ktx2': 'image/ktx2',
+    '.basis': 'application/octet-stream',
+    '.fbx': 'application/octet-stream'
 };
 
 http.createServer((req, res) => {
