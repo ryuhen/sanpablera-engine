@@ -189,7 +189,7 @@ const RULES = [
     rule({
         from: StateGroup.ATTACKING, source: TransitionSource.CANCEL,
         event: 'APC', priority: 70,
-        guard: (ctx) => ctx.api.canCancelInto(ctx.tier),
+        guard: (ctx) => ctx.api.canCancelInto(ctx.requestedTier || ctx.tier),
         to: State.ANY_POINT_CANCEL,
         debug: 'APC -> estado puente'
     }),
@@ -267,12 +267,17 @@ const RULES = [
     rule({
         from: State.POSTURA_DERIVADA_TECNICA, source: TransitionSource.INPUT,
         event: Intent.ATAQUE_ESPECIAL, priority: 75,
+        guard: (ctx) => ctx.affordable('ATAQUE_ESPECIAL'),
         to: State.ATAQUE_ESPECIAL,
         debug: 'derivada tecnica'
     }),
     rule({
         from: FREE, source: TransitionSource.INPUT, event: Intent.ATAQUE_ESPECIAL, priority: 65,
-        guard: (ctx) => ctx.api.hasMeter(ctx.move.meterCost),
+        // El presupuesto se mira por la clave del golpe que se va a hacer, NO
+        // por ctx.move: ctx.move es el golpe EN CURSO y desde suelo es null, asi
+        // que preguntar por el coste ahi reventaba (y resolve() se traga la
+        // excepcion, con lo que el especial nunca salia).
+        guard: (ctx) => ctx.affordable('ATAQUE_ESPECIAL'),
         to: State.ATAQUE_ESPECIAL,
         debug: 'especial (paga recurso)'
     }),

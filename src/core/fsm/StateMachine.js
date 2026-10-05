@@ -145,9 +145,16 @@ export class StateMachine {
 
         // Entrada: el handler del grupo ejecuta su onEnter y prepara el timer
         // dinamico (hitstun, duracion de golpe, frames de invulnerabilidad).
+        // El payload de la transicion (el golpe que la ha provocado) VIAJA con
+        // ella: sin esto el handler de IMPACTO no ve el hit y se queda con los
+        // valores por defecto (hitstun fijo, sin derribo al final).
         const handler = handlerFor(this.state);
         if (handler && handler.onEnter) {
-            handler.onEnter(this._ctx({ source: opts.source || TransitionSource.SYSTEM }));
+            handler.onEnter(this._ctx({
+                source: opts.source || TransitionSource.SYSTEM,
+                hit: opts.hit,
+                payload: opts.payload
+            }));
         }
 
         this.emitSignal('STATE_CHANGED', { from, to: nextId, reason: opts.reason });
@@ -172,7 +179,13 @@ export class StateMachine {
         // tabla normal (el handler GRAPPLE las traduce).
         if (this.inGroup(StateGroup.GRAPPLE)) return;
 
-        if (!this.state.control.canAct) return;
+        // Un estado que no puede actuar (tumbado, en hitstun) aun asi tiene que
+        // poder RECIBIR los intents que el propio estado declara: el unico
+        // legal ahi es la levantada. Sin esta excepcion el luchador nunca se
+        // levanta, porque canAct bloquea el unico evento que lo saca de ahi.
+        // Que sea legal de verdad lo decide la tabla (guard wakeupReady), no
+        // este if.
+        if (!this.state.control.canAct && !this.state.down) return;
 
         for (const intent of INTENT_PRIORITY) {
             if (!pressedIntent(this._input, intent)) continue;
@@ -211,7 +224,7 @@ export class StateMachine {
             source: TransitionSource.HIT,
             hit: h
         }));
-        if (found) this._enterVia(found, 'HIT', TransitionSource.HIT);
+        if (found) this._enterVia(found, 'HIT', TransitionSource.HIT, h);
     }
 
     /** El mundo dice "tocaste el suelo / la pared". */
@@ -265,8 +278,8 @@ export class StateMachine {
      * Aplica una transicion resuelta y ejecuta su puente: el estado puente
      * ANY_POINT_CANCEL sabe a donde tiene que ir cuando se acaba.
      */
-    _enterVia(found, event, source) {
-        const ok = this.changeState(found.to, { source, reason: found.rule.debug || event });
+    _enterVia(found, event, source, hit) {
+        const ok = this.changeState(found.to, { source, reason: found.rule.debug || event, hit });
 
         // El APC solo se gasta si la transicion es real.
         if (source === TransitionSource.CANCEL && ok) {
@@ -470,6 +483,10 @@ export class StateMachine {
             hit: (extra && extra.hit) || {},
             move: this.move,
             tier: this._data.cancelTier,
+            // Tier que el jugador PIDIO en este cancel. `tier` es el del golpe
+            // en curso: son dos cosas distintas y confundirlas hacia que un
+            // especial se pudiera cancelar con un jab.
+            requestedTier: (extra && extra.tier) || null,
             event: extra && extra.event,
             source: extra && extra.source,
 
@@ -487,6 +504,13 @@ export class StateMachine {
             grappleStance: () => {
                 const h = state.hull.height;
                 return h < 1.3 ? GrappleStance.AGACHADO : GrappleStance.PIE;
+            },
+
+            /** True si se puede pagar el recurso de un golpe por su clave. */
+            affordable: (moveKey) => {
+                const def = moveKey ? this.moves[moveKey] : null;
+                const cost = def ? (def.meterCost || 0) : 0;
+                return this._api().hasMeter(cost);
             },
 
             /** Puente con el mundo (la entidad Fighter). */

@@ -129,12 +129,13 @@ export class GrappleSession {
         this.frame++;
 
         // 1) Presion: la sube el TORI frame a frame mientras mantiene el agarre.
+        //    OJO al orden: aqui SOLO se suma. El decaimiento va mas abajo, ya
+        //    tocado el tope, porque si el UKE se comprobara despues de decaer,
+        //    la propia caida esquivaria el tope por un frame (100 -> 99) y el
+        //    UKE no se liberaria nunca.
         const perFrame = this._pressurePerFrame();
         if (perFrame) {
             this.pressure = Math.min(CONFIG.GRAPPLE_PRESSURE_MAX, this.pressure + perFrame);
-        } else if (this.action === null) {
-            // Sin accion en curso la presion baja: hay que actively presionar.
-            this.pressure = Math.max(0, this.pressure - CONFIG.GRAPPLE_PRESSURE_DECAY);
         }
 
         // 2) Accion en curso
@@ -172,7 +173,14 @@ export class GrappleSession {
             return true;
         }
 
-        // 6) La cuenta de escape se enfría: hay que MACHACAR de verdad, no dar
+        // 6) Sin accion en curso la presion baja: hay que PRESIONAR de verdad,
+        //    no agarrar y esperar. Se descuenta DESPUES de comprobar el tope y
+        //    el machaqueo, que son las dos salidas del agarre.
+        if (!perFrame && this.action === null) {
+            this.pressure = Math.max(0, this.pressure - CONFIG.GRAPPLE_PRESSURE_DECAY);
+        }
+
+        // 7) La cuenta de escape se enfría: hay que MACHACAR de verdad, no dar
         //    cuatro toques y esperar.
         if (this.escapeMash > 0 && ++this._mashCooldown >= 4) {
             this._mashCooldown = 0;
