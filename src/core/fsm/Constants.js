@@ -53,6 +53,27 @@
         COMBO_DAMAGE_SCALE_STEP: 0.12,
         COMBO_DAMAGE_SCALE_MIN: 0.25,
 
+        // --- AGARRE ---------------------------------------------------------
+        // Frames que el UKE tiene que machacar ESCAPE para romper el agarre.
+        // Alto a proposito: el agarre tiene que "darse", no ganarse con un
+        // dedo, y da tiempo a que el TORI suelte una sumision.
+        GRAPPLE_ESCAPE_MASH_FRAMES: 26,
+        // Presion acumulada que necesita el UKE para poder escapar. Cada
+        // ATEMI del TORI la sube; si llega al maximo, el UKE se libera solo
+        // (fallo del TORI) y el TORI entra en recuperacion.
+        GRAPPLE_PRESSURE_MAX: 100,
+        GRAPPLE_PRESSURE_PER_ATEMI: 34,
+        GRAPPLE_PRESSURE_PER_FRAME: 2,
+        GRAPPLE_PRESSURE_DECAY: 1,
+        // Frames de aplicacion de cada accion dentro del agarre.
+        GRAPPLE_ACTION_FRAMES: {
+            ATACAR: 14, PROYECCION: 26, SUMISION: 40, ESCAPE: 18
+        },
+        // Ventana de frames en la que se puede pedir un escape. Fuera de ella
+        // el escape no se registra (así el UKE no puede pre-mash).
+        GRAPPLE_ESCAPE_WINDOW_START: 6,
+        GRAPPLE_ESCAPE_WINDOW_END: 150,
+
         // --- JUGGLE ----------------------------------------------------------
         // A partir de este numero de golpes en el aire, el rival pierde el
         // derecho a Air Recovery y solo le queda Combo Breaker.
@@ -107,6 +128,11 @@
         AIRE_LIBRE: 34,
         JUGGLER: 35,
         SALTO_AEREO_RECUPERACION: 36,
+// Caida lenta: el cuerpo cae flotando tras una tecnica o un air dash.
+        // Se separa de AIRE_LIBRE porque aqui el motor tiene que REDUCIR la
+        // velocidad de caida (es la ventana para los ataques aereos) y
+        // permitir un ataque de caida.
+        CAIDA_LENTA: 37,
 
         // --- 4. IMPACTO, SUELO Y RECUPERACION ------------------------------
         GOLPEADO: 40,
@@ -131,7 +157,47 @@
         ATAQUE_LIGERO: 60,
         ATAQUE_PESADO: 61,
         ATAQUE_ESPECIAL: 62,
-        ATAQUE_AEREO: 63
+        ATAQUE_AEREO: 63,
+
+        // --- 6. AGARRE / GRAPPLING -----------------------------------------
+        // Los estados de agarre se generan en pares (uno por papel: UKE y
+        // TORI) a partir de GrappleStance, para que anadir una postura nueva
+        // no obligue a escribir 2 bloques de codigo. La numeracion reserva el
+        // rango 70-99 para esto. El mapeo Paper x Postura -> id esta en
+        // SPF.GRAPPLE_STATES mas abajo.
+        AGARRE_UKE_PIE: 70,
+        AGARRE_TORI_PIE: 71,
+        AGARRE_UKE_AGACHADO: 72,
+        AGARRE_TORI_AGACHADO: 73,
+        AGARRE_UKE_TORI_AGACHADO: 74,
+        AGARRE_TORI_TORI_AGACHADO: 75,
+        AGARRE_ATEMI_UKE: 76,
+        AGARRE_ATEMI_TORI: 77,
+        AGARRE_UKEMI_UKE: 78,
+        AGARRE_UKEMI_TORI: 79,
+        AGARRE_PROYECCION_UKE: 80,
+        AGARRE_PROYECCION_TORI: 81,
+        AGARRE_SUMISION_UKE: 82,
+        AGARRE_SUMISION_TORI: 83,
+        AGARRE_ESCAPE_UKE: 84,
+        AGARRE_ESCAPE_TORI: 85,
+        AGARRE_PRESION_UKE: 86,
+        AGARRE_PRESION_TORI: 87,
+        AGARRE_SUELO_UKE: 88,
+        AGARRE_SUELO_TORI: 89,
+        AGARRE_SUELO_AGACHADO_UKE: 90,
+        AGARRE_SUELO_AGACHADO_TORI: 91,
+        AGARRE_SUELO_ATEMI_UKE: 92,
+        AGARRE_SUELO_ATEMI_TORI: 93,
+        AGARRE_SUELO_ESCAPE_UKE: 94,
+        AGARRE_SUELO_ESCAPE_TORI: 95,
+        AGARRE_SUELO_UKEMI_UKE: 96,
+        AGARRE_SUELO_UKEMI_TORI: 97,
+        // El clinch bajo (los dos agachados) NO es lo mismo que "el tori
+        // agachado": el clinch es donde los dos estan abajo, asi que el UKE
+        // escapa mejor y no admite sumision. Por eso tiene ids propios.
+        AGARRE_UKE_CLINCH: 98,
+        AGARRE_TORI_CLINCH: 99
     };
 
     // =========================================================================
@@ -167,7 +233,10 @@
         DOWNED: 'DOWNED',                  // En el suelo
         WAKEUP: 'WAKEUP',                  // Levantandose
         ATTACKING: 'ATTACKING',
-        STUNNED: 'STUNNED'                 // Mareado / sin aire
+        STUNNED: 'STUNNED',                // Mareado / sin aire
+        GRAPPLE: 'GRAPPLE',                // Cualquier estado de agarre
+        GRAPPLE_UKE: 'GRAPPLE_UKE',        // Papel: recibe la tecnica
+        GRAPPLE_TORI: 'GRAPPLE_TORI'        // Papel: aplica la tecnica
     };
 
     // =========================================================================
@@ -183,6 +252,7 @@
         IMPACT: 'IMPACT',
         DOWNED: 'DOWNED',
         WAKEUP: 'WAKEUP',
+        GRAPPLE: 'GRAPPLE',   // agarre: la fase que decide paper y postura
         SYSTEM: 'SYSTEM'
     };
 
@@ -237,6 +307,164 @@
         ALTA: 'ALTA',     // Cubre depie
         MEDIA: 'MEDIA',   // Cubre el centro
         BAJA: 'BAJA'      // Cubre agachado
+    };
+
+    // =========================================================================
+    // NIVELES DE IMPACTO
+    // -------------------------------------------------------------------------
+    // No es solo "cuanto dano": decide QUE estado de reaccion se entra y COMO
+    // se cae al suelo. Un golpe BAJO derriba de cara (barrido), uno FUERTE
+    // rompe guardia y garantiza KD, uno MEDIO solo escalda. Mezclar el dano con
+    // esta decision es el bug clasico: un jab que hace KD.
+    // =========================================================================
+    const HitLevel = {
+        BAJO: 'BAJO',       // Barrido / golpe bajo: derriba de cara
+        MEDIO: 'MEDIO',     // Cuerpo a cuerpo: hitstun, sin KD
+        FUERTE: 'FUERTE'    // Rompe guardia, KD garantizado
+    };
+
+    // =========================================================================
+    // FASES DE ATAQUE
+    // -------------------------------------------------------------------------
+    // Sub-estado dentro de un estado ATAQUE_*. Se deriva del contador de frames
+    // del propio estado (ver StateMachine#getAttackPhase), no es un estado del
+    // enum: separate los 4 ataques en 12 estados distintos haria la tabla de
+    // transiciones ilegible sin ganar nada.
+    // =========================================================================
+    const AttackPhase = {
+        STARTUP: 'STARTUP',   // Anticipacion: el golpe AUN no sale
+        ACTIVE: 'ACTIVE',     // Hitbox activa: este es el unico frame que hace dano
+        RECOVERY: 'RECOVERY'  // Follow-through: cancelable segun tier
+    };
+
+// =========================================================================
+    // SISTEMA DE AGARRE (GRAPPLING)
+    // -------------------------------------------------------------------------
+    // En un agarre hay SIEMPRE dos papeles y el motor tiene que saber cual es
+    // cual en cada frame, porque no tienen los mismos permisos:
+    //
+    //   TORI = el que APLICA la tecnica (engancha, golpea, lanza, suma).
+    //   UKE  = el que la RECIBE (la sufre, intenta escapar).
+    //
+    // Por eso el papel es parte del estado (`GrappleRole`) y no una variable
+    // suelta: cambiar de estado por papel es lo que activa las animaciones,
+    // el hull y el control correctos.
+    //
+    // Y dentro del papel, la POSTURA del agarre (de pie, agachado, atemi,
+    // ukemi, suelo...) tambien es estado, porque cada combinacion tiene
+    // animaciones propias para ataque, escape, proyeccion y sumision.
+    // =========================================================================
+    const GrappleRole = {
+        UKE: 'UKE',     // recibe la tecnica
+        TORI: 'TORI'    // aplica la tecnica
+    };
+
+    // Posturas/variantes de agarre. Cada valor genera DOS estados (uno por
+    // papel) en states/GrappleStates.js, y cada uno declara las animaciones
+    // de ATACAR, ESCAPE, PROYECCION y SUMISION.
+    const GrappleStance = {
+        // --- agarres de pie ---
+        PIE: 'PIE',                                     // los dos de pie
+        UKE_AGACHADO: 'UKE_AGACHADO',                   // uke abajo, tori de pie
+        TORI_AGACHADO: 'TORI_AGACHADO',                 // tori abajo, uke de pie
+        AGACHADO: 'AGACHADO',                           // clinch bajo, los dos abajo
+        // --- momentos dentro del agarre ---
+        ATEMI: 'ATEMI',                                 // golpe corto en el agarre
+        UKEMI: 'UKEMI',                                 // rotura de caida
+        PROYECCION: 'PROYECCION',                       // la proyeccion se ejecuta
+        SUMISION: 'SUMISION',                           // sumision (no se puede matar)
+        ESCAPE: 'ESCAPE',                               // escape / raijin
+        PRESION: 'PRESION',                             // mantener al rival preso
+        // --- agarres en el suelo (groundwork) ---
+        SUELO: 'SUELO',                                 // top position
+        SUELO_AGACHADO: 'SUELO_AGACHADO',               // bottom position
+        SUELO_ATEMI: 'SUELO_ATEMI',                     // ground and pound
+        SUELO_ESCAPE: 'SUELO_ESCAPE',                   // escape desde el suelo
+        SUELO_UKEMI: 'SUELO_UKEMI'                      // rotura en el suelo
+    };
+
+    // Acciones que se pueden resolver dentro de un agarre. El orden del array
+    // ES la prioridad cuando tori y uke pulsan a la vez en el mismo frame.
+    const GrappleAction = {
+        ESCAPE: 'ESCAPE',
+        ATACAR: 'ATACAR',
+        PROYECCION: 'PROYECCION',
+        SUMISION: 'SUMISION'
+    };
+
+    // Prioridad de resolucion: la sumision gana a la proyeccion, que gana al
+    // golpe, que pierde contra el escape. Se invierte a proposito para que el
+    // TORI (el que ataca) tenga que ganarse la posicion: si el escape ganara
+    // siempre, no habria agarre posible.
+    const GRAPPLE_PRIORITY = Object.freeze([
+        GrappleAction.SUMISION,
+        GrappleAction.PROYECCION,
+        GrappleAction.ATACAR,
+        GrappleAction.ESCAPE
+    ]);
+
+    // =========================================================================
+    // ORIENTACION DEL CUERPO RESPECTO AL RIVAL
+    // -------------------------------------------------------------------------
+    // Grados sobre el eje de combate (0 = la cabeza mira al rival). Es la
+    // generalizacion de DownOrientation: el suelo (43/44) y el knockdown usan el
+    // MISMO eje, de modo que "caido de espaldas mirando al rival" y "caido de
+    // costado a 45 grados" son el mismo dato, no dos estados distintos.
+    // =========================================================================
+    const FacingAxis = {
+        CABEZA_A_RIVAL: 0,     // De espaldas: la cabeza mira al oponente
+        DIAGONAL_45: 45,       // Angulo intermedio (flanco derecho)
+        DIAGONAL_135: 135,     // Angulo intermedio (flanco izquierdo)
+        PIES_A_RIVAL: 180      // De frente: los pies apuntan al oponente
+    };
+
+    // Traduccion de la orientacion del suelo al eje numerico. Sin este mapa
+    // cada consumidor tendria que switchear sobre DownOrientation.
+    const ORIENTATION_TO_AXIS = {
+        [DownOrientation.CABEZA_A_RIVAL]: FacingAxis.CABEZA_A_RIVAL,
+        [DownOrientation.FLANCO_DERECHO]: FacingAxis.DIAGONAL_45,
+        [DownOrientation.FLANCO_IZQUIERDO]: FacingAxis.DIAGONAL_135,
+        [DownOrientation.PIES_A_RIVAL]: FacingAxis.PIES_A_RIVAL
+    };
+
+    // =========================================================================
+    // ORIENTACION VISUAL RESPECTO A LA CAMARA
+    // -------------------------------------------------------------------------
+    // Los juegos de lucha necesitan dos sets de animacion para la MISMA accion
+    // (normal / agachado / salto): una con el personaje de espaldas a camara y
+    // otra de frente. Se modela como dato resuelto en runtime, NO duplicando
+    // estados: NORMAL_A y NORMAL_B son los dos sets para los momentos
+    // guionizados (intro, KO), y para el combate everyday la FSM elige el set
+    // en runtime segun hacia donde mire el personaje.
+    // =========================================================================
+    const VisualFacing = {
+        ESPALDA_A_CAMARA: 'ESPALDA_A_CAMARA',
+        FRENTE_A_CAMARA: 'FRENTE_A_CAMARA'
+    };
+
+    // =========================================================================
+    // LADO DEL COMBATE
+    // =========================================================================
+    const FighterSide = {
+        P1: 'P1',
+        P2: 'P2'
+    };
+
+    // Sufijo de animacion por orientacion visual. `__f` = de frente a camara,
+    // `__b` = de espaldas. Se mantiene corto porque los clips vienen del
+    // exportador del modelo y los nombres largos revientan los pipelines.
+    const ANIM_SUFFIX = {
+        [VisualFacing.FRENTE_A_CAMARA]: '__f',
+        [VisualFacing.ESPALDA_A_CAMARA]: '__b'
+    };
+
+    // Clave de animacion concreta para un estado y una orientacion visual dados.
+    // Un unico punto de verdad para el nombre del clip: si el exportador cambia
+    // el sufijo, se cambia aqui y no en 20 sitios.
+    SPF.animationKey = function (baseKey, visualFacing) {
+        if (!baseKey) return null;
+        const suffix = ANIM_SUFFIX[visualFacing];
+        return suffix ? baseKey + suffix : baseKey;
     };
 
     // =========================================================================
@@ -329,6 +557,16 @@
         [CancelTier.TECHNIQUE]: 3
     };
 
+    // A donde lleva cada tier de cancelacion. Es DATO y no una funcion porque el
+    // estado puente ANY_POINT_CANCEL solo tiene que saber leerlo: el cancel se
+    // pide con un tier y la tabla de transiciones se encarga del resto.
+    const CANCEL_TARGET_STATE = {
+        [CancelTier.LIGHT]: State.ATAQUE_LIGERO,
+        [CancelTier.HEAVY]: State.ATAQUE_PESADO,
+        [CancelTier.SPECIAL]: State.ATAQUE_ESPECIAL,
+        [CancelTier.TECHNIQUE]: State.POSTURA_DERIVADA_TECNICA
+    };
+
     // =========================================================================
     // EXPORT
     // =========================================================================
@@ -339,6 +577,15 @@
     SPF.Input = Object.freeze(Input);
     SPF.Intent = Object.freeze(Intent);
     SPF.GuardHeight = Object.freeze(GuardHeight);
+    SPF.HitLevel = Object.freeze(HitLevel);
+    SPF.AttackPhase = Object.freeze(AttackPhase);
+    SPF.GrappleRole = Object.freeze(GrappleRole);
+    SPF.GrappleStance = Object.freeze(GrappleStance);
+    SPF.GrappleAction = Object.freeze(GrappleAction);
+    SPF.GRAPPLE_PRIORITY = Object.freeze(GRAPPLE_PRIORITY);
+    SPF.FacingAxis = Object.freeze(FacingAxis);
+    SPF.VisualFacing = Object.freeze(VisualFacing);
+    SPF.FighterSide = Object.freeze(FighterSide);
     SPF.TransitionSource = Object.freeze(TransitionSource);
     SPF.PhysicalFlag = Object.freeze(PhysicalFlag);
     SPF.VelocityPolicy = Object.freeze(VelocityPolicy);
@@ -346,6 +593,8 @@
     SPF.DownOrientation = Object.freeze(DownOrientation);
     SPF.CancelTier = Object.freeze(CancelTier);
     SPF.CANCEL_TIER_ORDER = Object.freeze(CANCEL_TIER_ORDER);
+    SPF.CANCEL_TARGET_STATE = Object.freeze(CANCEL_TARGET_STATE);
+    SPF.ORIENTATION_TO_AXIS = Object.freeze(ORIENTATION_TO_AXIS);
 
     // Utilidad de.flags -> bitmask. Permite escribir un perfil de fisicas
     // legible en el catalogo: physicalFlags: [PhysicalFlag.LOCK_ROTATION, ...]
@@ -362,4 +611,73 @@
         return (mask & flag) === flag;
     };
 
-})(typeof window !== 'undefined' ? window : globalThis);
+    // =========================================================================
+    // MAPEO DE AGARRE: (postura, papel) -> id de estado
+    // -------------------------------------------------------------------------
+    // Es la unica tabla que hay que tocar para anadir una postura de agarre
+    // nueva: el estado, su FSM y sus animaciones salen de aqui.
+    // =========================================================================
+    SPF.GRAPPLE_STATES = Object.freeze({
+        [GrappleStance.PIE]: Object.freeze({ UKE: State.AGARRE_UKE_PIE, TORI: State.AGARRE_TORI_PIE }),
+        [GrappleStance.UKE_AGACHADO]: Object.freeze({ UKE: State.AGARRE_UKE_AGACHADO, TORI: State.AGARRE_TORI_AGACHADO }),
+        [GrappleStance.TORI_AGACHADO]: Object.freeze({ UKE: State.AGARRE_UKE_TORI_AGACHADO, TORI: State.AGARRE_TORI_TORI_AGACHADO }),
+        [GrappleStance.AGACHADO]: Object.freeze({ UKE: State.AGARRE_UKE_CLINCH, TORI: State.AGARRE_TORI_CLINCH }),
+        [GrappleStance.ATEMI]: Object.freeze({ UKE: State.AGARRE_ATEMI_UKE, TORI: State.AGARRE_ATEMI_TORI }),
+        [GrappleStance.UKEMI]: Object.freeze({ UKE: State.AGARRE_UKEMI_UKE, TORI: State.AGARRE_UKEMI_TORI }),
+        [GrappleStance.PROYECCION]: Object.freeze({ UKE: State.AGARRE_PROYECCION_UKE, TORI: State.AGARRE_PROYECCION_TORI }),
+        [GrappleStance.SUMISION]: Object.freeze({ UKE: State.AGARRE_SUMISION_UKE, TORI: State.AGARRE_SUMISION_TORI }),
+        [GrappleStance.ESCAPE]: Object.freeze({ UKE: State.AGARRE_ESCAPE_UKE, TORI: State.AGARRE_ESCAPE_TORI }),
+        [GrappleStance.PRESION]: Object.freeze({ UKE: State.AGARRE_PRESION_UKE, TORI: State.AGARRE_PRESION_TORI }),
+        [GrappleStance.SUELO]: Object.freeze({ UKE: State.AGARRE_SUELO_UKE, TORI: State.AGARRE_SUELO_TORI }),
+        [GrappleStance.SUELO_AGACHADO]: Object.freeze({ UKE: State.AGARRE_SUELO_AGACHADO_UKE, TORI: State.AGARRE_SUELO_AGACHADO_TORI }),
+        [GrappleStance.SUELO_ATEMI]: Object.freeze({ UKE: State.AGARRE_SUELO_ATEMI_UKE, TORI: State.AGARRE_SUELO_ATEMI_TORI }),
+        [GrappleStance.SUELO_ESCAPE]: Object.freeze({ UKE: State.AGARRE_SUELO_ESCAPE_UKE, TORI: State.AGARRE_SUELO_ESCAPE_TORI }),
+        [GrappleStance.SUELO_UKEMI]: Object.freeze({ UKE: State.AGARRE_SUELO_UKEMI_UKE, TORI: State.AGARRE_SUELO_UKEMI_TORI })
+    });
+
+    // Id de estado de agarre para (postura, papel). Devuelve null si la
+    // combinacion no existe, que es preferible a devolver un id equivocado:
+    // el llamante lo detecta y avisa en vez de meter al luchador en un estado
+    // fantasma.
+    SPF.grappleState = function (stance, role) {
+        const row = SPF.GRAPPLE_STATES[stance];
+        return row ? (row[role] != null ? row[role] : null) : null;
+    };
+
+    // Papel contrario. En un agarre los dos papeles se/heredan al cambiar de
+    // momento (si el uke escapa, el tori pasa a ESCAPE_TORI).
+    SPF.otherRole = function (role) {
+        return role === GrappleRole.TORI ? GrappleRole.UKE : GrappleRole.TORI;
+    };
+    // =========================================================================
+    // El resto del papel se mantiene: si el uke escapa, el tori pasa a
+    // ESCAPE_TORI con la misma mecanica y el otro rol.
+    // =========================================================================
+
+    // -------------------------------------------------------------------------
+    // Utilidad de depuracion: nombre legible de un estado a partir de su id.
+    // El enum es numerico a proposito (1 byte por red); a la hora de leer un
+    // log "estado 43" no dice nada, y en un juego de lucha el 90% del trabajo
+    // es leer logs.
+    // -------------------------------------------------------------------------
+    SPF.stateName = function (stateId) {
+        for (const name in State) {
+            if (Object.prototype.hasOwnProperty.call(State, name) && State[name] === stateId) {
+                return name;
+            }
+        }
+        return 'UNKNOWN(' + stateId + ')';
+    };
+
+    // Direccion opuesta de un eje de combate. El wakeup y el knockdown lo usan
+    // para decidir si el primer frame sale mirando al rival o de espaldas.
+    SPF.oppositeAxis = function (axis) {
+        return FacingAxis.PIES_A_RIVAL - axis;
+    };
+
+} )(typeof window !== 'undefined' ? window : globalThis);
+
+// El archivo mantiene su diseño de namespace global (SPF en window) para
+// poder cargarse tambien como script clásico, pero expone el namespace como
+// export por defecto para que el resto del motor lo importe como módulo ES.
+export default SPF;
