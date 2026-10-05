@@ -13,6 +13,8 @@ Esta bitácora nos permite registrar y sincronizar las actividades realizadas en
 | 2026-10-05 | Sistema | *este commit* | Base matemática y de contrato del rig | `src/core/cine/Math3.js` (vectores, quaternions, matrices column-major, damping independiente del framerate, 7 curvas de easing) y `src/core/cine/CineConstants.js` (CFG a 60 Hz, 21 huesos del esqueleto humanoide con el CONTRATO documentado, 10 canales, 9 morphs de física, 6 presets de impacto, planos y transiciones). Se corrigió `Side.NONE`, que existía en la API pero no se usaba en los 5 huesos axiales |
 | 2026-10-05 | Sistema | *este commit* | Modelo humanoide con rigging (sustituye al cubo) | Búsqueda y selección de asset: `assets/characters/mannequin.glb` = "Rigged Figure" de Khronos (antes CesiumMan), **CC BY 4.0**, 50 KB, malla skinned con 19 huesos y 1 clip. Se verificó numéricamente que el archivo es Z-up y que con `rot.x = -π/2` el personaje queda de pie (cabeza 0,507 m sobre caderas, caderas 0,601 m sobre los pies). Créditos en `assets/ATTRIBUTIONS.md`. Se añadió `src/render/BoneMap.js`, que traduce los nombres de hueso de cualquier modelo al CONTRATO (alias de Khronos, Mixamo con y sin prefijo, y genéricos de Kenney/Quaternius/RPM) |
 | 2026-10-05 | Sistema | *este commit* | Pruebas y serving de assets | `tests/cine.smoke.mjs` (**333 comprobaciones, 0 fallos**), incluida la verificación del `.glb` real del repo. `npm test` ejecuta las dos suites (64 + 333 = 397). `server.js` sirve `.glb/.gltf/.bin/.ktx2/.fbx` |
+| 2026-10-05 | Sistema | `80a3bd9` | Integración del remoto | El remoto tenía 8 commits que no eran ancestros del `main` local. Fusionados; los conflictos add/add de `BITACORA.md`, `index.html` y `server.js` se resolvieron con la versión local (la última modificada). A partir de aquí el push es fast-forward y no hace falta force-push |
+| 2026-10-05 | Sistema | *este commit* | Bitácora del bloqueo del push | Se documenta cómo desbloquear el push a `ryuhen/sanpablera-engine`: la clave pública que hay que registrar en GitHub y la alternativa por token HTTPS |
 
 ### Cómo se comprobó que el modelo es un humano de pie
 
@@ -77,13 +79,35 @@ pendiente la confirmación visual en el navegador.
 
 ### Bloqueos
 
-- **`git push` a GitHub por SSH falla**: `git@github.com: Permission denied
-  (publickey)`. Existe `/root/.ssh/id_ed25519_github` y `/root/.ssh/config`,
-  pero GitHub rechaza esa clave. No hay `gh` CLI ni token. Hasta que haya una
-  clave válida, el push no se puede hacer.
-- El remoto (`6b2485d`) tiene cuatro commits que **no son ancestros** del `main`
-  local, aunque su contenido ya está todo aquí. Para poder hacer push normal hay
-  que integrar ese remoto en el grafo local (merge), no hacer force-push.
+- **`git push` a `ryuhen/sanpablera-engine` sigue sin poder hacerse: no hay
+  autenticación válida.** Probadas las dos vías:
+  - SSH: `git@github.com: Permission denied (publickey)`. Existe
+    `/root/.ssh/id_ed25519_github` y `~/.ssh/config` ya apunta a ella
+    (`IdentitiesOnly yes`), pero **GitHub no reconoce esa clave pública**, así
+    que la clave no está dada de alta en la cuenta.
+  - HTTPS: `fatal: could not read Username for 'https://github.com'`. No hay
+    token ni credenciales guardadas, y no se puede pedir usuario de forma
+    interactiva.
+  - `gh` CLI no está instalado y no hay variables de GitHub en el entorno.
+
+  **Cómo desbloquearlo (una de dos):**
+  1. Añadir esta clave pública en GitHub → *Settings* → *SSH and GPG keys* →
+     *New SSH key*:
+     ```
+     ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILJAKSVzAIc9H9K0pPiDWlCgy6JG5CXPY5q6X3ifpoZ0 ryuhen@sanpablera-engine
+     ```
+  2. O crear un token personal con permiso `repo` y pushing por HTTPS:
+     ```
+     git remote set-url origin https://<usuario>:<token>@github.com/ryuhen/sanpablera-engine.git
+     ```
+
+  En cuanto haya una de las dos, el push es un fast-forward y no hace falta
+  nada más: los 8 commits del remoto ya están fusionados en el grafo local.
+
+### Lo que falta para que el remoto reciba el trabajo
+
+- [ ] Autenticar el push (ver arriba). Todo lo demás ya está listo: 6 commits
+      locales por delante, el remoto integrado y el árbol limpio.
 
 ---
 
