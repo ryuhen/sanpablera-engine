@@ -74,7 +74,11 @@ function clip(stance, action, side) {
  */
 function actions(stance, opts = {}) {
     const build = (action, overrides) => {
-        if ((opts.skip || []).indexOf(action) !== -1) return null;
+        // `null` como override significa "esta postura NO admite la accion".
+        // Sin este caso, `null || {}` construiria la accion por defecto y el
+        // estado declararia un clip que en realidad no existe (p. ej. la
+        // sumision desde clinch, que el diseno prohibe).
+        if (overrides === null || (opts.skip || []).indexOf(action) !== -1) return null;
         const conf = Object.assign({
             frames: A[action],
             damage: 0,

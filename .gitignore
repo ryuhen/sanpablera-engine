@@ -41,6 +41,18 @@ build/Release
 node_modules/
 jspm_packages/
 
+# Babylon.js vendorizado en la raiz: son copias byte a byte de
+# node_modules/babylonjs/ (mismo md5) que se colaron en un commit. El motor
+# carga ./node_modules/babylonjs/babylon.js, asi que volver a subirlos solo
+# anade 20 MB al repositorio.
+/babylon.js
+/babylon.max.js
+/babylon.es5.js
+/babylon.js.map
+/babylon.max.js.map
+/babylon.d.ts
+/babylon.module.d.ts
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
