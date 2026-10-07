@@ -1,130 +1,246 @@
+/**
+ * ============================================================================
+ * SANPABLERA ENGINE · core/Engine.js
+ * ----------------------------------------------------------------------------
+ * Arranque del juego: motor, escena, fisicas, peleadores e interfaz.
+ *
+ * QUE HA CAMBIADO RESPECTO AL CUBO DE PRUEBA
+ * ----------------------------------------------------------------------------
+ *   Antes habia un cubo de 1,5 m con fisicas que caia al suelo. Era un
+ *   comprobador de que el motor arrancaba, nada mas. Ahora en su lugar se
+ *   montan DOS peleadores con el modelo de assets/characters/mannequin.glb, cada
+ *   uno con su esqueleto real y su rig numerico (cine/Rig.js).
+ *
+ *   El cubo no se ha escondido: se ha QUITADO. Dejarlo colgando seria ruido.
+ *
+ * ORDEN DE ARRANQUE (importa, y por eso esta en este orden)
+ * ----------------------------------------------------------------------------
+ *   1. LoadingScreen, ANTES de tocar BABYLON. La pantalla de carga de grafiti
+ *      (ui/LoadingScreen.js) pesa fases reales, asi que tiene que existir para
+ *      que la primera fase "motor" se pueda marcar.
+ *   2. Motor y escena.
+ *   3. Fisicas.
+ *   4. Peleadores: es la fase lenta (lectura del .glb, construccion del rig).
+ *   5. Interfaz.
+ *   6. El boton de "toca para jugar" pide pantalla completa y suelta el
+ *      arranque. Hasta ese gesto no se arranca el bucle: si se arrancara antes,
+ *      en un movil se perderian los primeros segundos de juego por culpa de la
+ *      pantalla completa.
+ *
+ * POR QUE LOS PELOADORES NO LLEVAN FISICA
+ * ----------------------------------------------------------------------------
+ *   Un esqueleto con Cannon por encima se desincroniza en un solo frame. El
+ *   suelo y las colisiones los lleva la logica de combate (el spacing viene de
+ *   donde estan los pies, no de un rigidbody). Aqui la fisica se queda en el
+ *   suelo y en el muro de contencion del ring.
+ * ============================================================================
+ */
+
 import UI from '../ui/UI.js';
-// Create loading screen
-const loadingScreenDiv = document.createElement('div');
-loadingScreenDiv.style.position = 'absolute';
-loadingScreenDiv.style.top = '0';
-loadingScreenDiv.style.left = '0';
-loadingScreenDiv.style.width = '100%';
-loadingScreenDiv.style.height = '100%';
-loadingScreenDiv.style.backgroundColor = '#000';
-loadingScreenDiv.style.display = 'flex';
-loadingScreenDiv.style.flexDirection = 'column';
-loadingScreenDiv.style.justifyContent = 'center';
-loadingScreenDiv.style.alignItems = 'center';
-loadingScreenDiv.style.color = '#fff';
-loadingScreenDiv.style.fontFamily = 'Arial, sans-serif';
-loadingScreenDiv.style.fontSize = '24px';
-document.body.appendChild(loadingScreenDiv);
+import LoadingScreen from '../ui/LoadingScreen.js';
+import { loadCharacterModel } from '../render/CharacterModel.js';
+import { stancePose } from './cine/Stances.js';
 
-const loadingText = document.createElement('div');
-loadingText.textContent = 'Loading...';
-loadingScreenDiv.appendChild(loadingText);
+const MODEL_URL = './assets/characters/mannequin.glb';
+const FIGHTERS = [
+    { name: 'P1', x: -0.55, z: 0.45, facing: 0, color: [0.30, 0.55, 1.00] },
+    { name: 'P2', x: 0.55, z: -0.45, facing: Math.PI, color: [1.00, 0.42, 0.35] }
+];
 
-const progressBarContainer = document.createElement('div');
-progressBarContainer.style.width = '80%';
-progressBarContainer.style.height = '30px';
-progressBarContainer.style.backgroundColor = '#333';
-progressBarContainer.style.borderRadius = '5px';
-progressBarContainer.style.marginTop = '20px';
-loadingScreenDiv.appendChild(progressBarContainer);
+// ===========================================================================
+// 1. PANTALLA DE CARGA (antes de nada, para que el progreso sea real)
+// ===========================================================================
 
-const progressBar = document.createElement('div');
-progressBar.style.width = '0%';
-progressBar.style.height = '100%';
-progressBar.style.backgroundColor = '#4CAF50';
-progressBar.style.borderRadius = '5px';
-progressBarContainer.appendChild(progressBar);
+const loading = new LoadingScreen({
+    title: 'SANPABLERA',
+    subtitle: 'MOTOR DE LUCHA'
+});
+loading.step('motor');
 
-const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas, true);
+// ===========================================================================
+// 2. MOTOR Y ESCENA
+// ===========================================================================
 
-// Create scene
-const scene = new BABYLON.Scene(engine);
+const B = window.BABYLON;
+const canvas = document.getElementById('renderCanvas');
+const engine = new B.Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true });
+const scene = new B.Scene(engine);
+scene.clearColor = new B.Color4(0.07, 0.08, 0.11, 1);
+loading.step('escena');
 
-// 1. Habilitar el motor de físicas de Babylon (usando CannonJS o el motor nativo de físicas)
-const gravityVector = new BABYLON.Vector3(0, -9.81, 0);
-scene.enablePhysics(gravityVector, new BABYLON.CannonJSPlugin());
+// ===========================================================================
+// 3. FISICAS
+// ===========================================================================
 
-// 2. Crear una cámara y controles
-const camera = new BABYLON.ArcRotateCamera("Camera", Math.PI / 2, Math.PI / 3, 6, BABYLON.Vector3.Zero(), scene);
+const gravity = new B.Vector3(0, -9.81, 0);
+// El motor nativo no necesita CDN. Si Cannon esta (lo carga index.html) se
+// usa el plugin de Cannon; si no, se sigue con el motor de Babylon, que para
+// suelo y muro es mas que suficiente.
+if (B.CannonJSPlugin) {
+    scene.enablePhysics(gravity, new B.CannonJSPlugin(true, 10, B.Cannon));
+}
+loading.step('fisicas');
+
+// ===========================================================================
+// 4. ESCENARIO
+// ===========================================================================
+
+function matte(scene_, hex, spec) {
+    const m = new B.StandardMaterial('mat', scene_);
+    const c = B.Color3.FromHexString(hex);
+    m.diffuseColor = c;
+    m.specularColor = new B.Color3(spec, spec, spec);
+    m.specularPower = 32;
+    return m;
+}
+
+const ground = B.MeshBuilder.CreateGround('ground', { width: 24, height: 24, subdivisions: 2 }, scene);
+ground.material = matte(scene, '#2c2f3a', 0.06);
+ground.receiveShadows = true;
+
+// Suelo de combate: un circulo mas claro, para que se vea el "ring".
+const mat = B.MeshBuilder.CreateDisc('mat', { radius: 3.1, tessellation: 96 }, scene);
+mat.rotation.x = Math.PI / 2;
+mat.position.y = 0.002;
+mat.material = matte(scene, '#3b4052', 0.05);
+
+// Vallas del ring: ocho postes. Dan escala y quitan la sensacion de "plano
+// infinito flotando en el vacio".
+const railMat = matte(scene, '#151822', 0.20);
+for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const post = B.MeshBuilder.CreateCylinder('post' + i, { diameter: 0.07, height: 1.05 }, scene);
+    post.position.set(Math.cos(a) * 3.1, 0.52, Math.sin(a) * 3.1);
+    post.material = railMat;
+}
+
+const hemi = new B.HemisphericLight('hemi', new B.Vector3(0, 1, 0), scene);
+hemi.intensity = 0.55;
+hemi.groundColor = new B.Color3(0.16, 0.15, 0.20);
+
+const key = new B.DirectionalLight('key', new B.Vector3(-0.5, -1, 0.45), scene);
+key.position = new B.Vector3(2, 6, -3);
+key.intensity = 1.15;
+
+const rim = new B.DirectionalLight('rim', new B.Vector3(0.6, -0.35, -0.75), scene);
+rim.position = new B.Vector3(-3, 3, 4);
+rim.intensity = 0.55;
+rim.diffuse = new B.Color3(0.55, 0.65, 1.0);
+
+const camera = new B.ArcRotateCamera('cam', Math.PI / 2, 1.15, 5.2, new B.Vector3(0, 1.0, 0), scene);
 camera.attachControl(canvas, true);
+camera.lowerRadiusLimit = 2.2;
+camera.upperRadiusLimit = 12;
+camera.wheelDeltaPercentage = 0.02;
 
-// 3. Añadir luz
-const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+// ===========================================================================
+// 5. PELEADORES  (el cubo vivio aqui)
+// ===========================================================================
 
-// 4. Crear el suelo (Escenario)
-const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 10, height: 10 }, scene);
-// Añadir físicas estáticas al suelo para que actúe como tope
-ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-    ground,
-    BABYLON.PhysicsImpostor.BoxImpostor,
-    { mass: 0, restitution: 0.9 },
-    scene
-);
+/**
+ * Peleador de escena: envuelve un CharacterModel con lo que el juego necesita
+ * saber de el (donde esta, hacia donde mira, el ultimo FSM, etc). La logica de
+ * combate va en core/fsm; aqui solo hay estado de render.
+ */
+function makeFighter(spec) {
+    const f = Object.assign({}, spec, {
+        x: spec.x,
+        z: spec.z,
+        facing: spec.facing,
+        // Cadencia de la interpolacion de poses.
+        fkState: null
+    });
+    return f;
+}
 
-// Material opcional para diferenciar el suelo del objeto
-const groundMaterial = new BABYLON.StandardMaterial("groundMat", scene);
-groundMaterial.diffuseColor = new BABYLON.Color3(0.3, 0.3, 0.3);
-ground.material = groundMaterial;
+const fighters = FIGHTERS.map(makeFighter);
 
-// 5. Crear el objeto (cubo inicial que luego reemplazaremos por el muñeco)
-const box = BABYLON.MeshBuilder.CreateBox("box", { size: 1.5 }, scene);
-box.position.y = 4; // Lo colocamos flotando para que caiga al suelo por gravedad
-
-// Añadir físicas dinámicas al cubo (con masa para que caiga y colisione)
-box.physicsImpostor = new BABYLON.PhysicsImpostor(
-    box,
-    BABYLON.PhysicsImpostor.BoxImpostor,
-    { mass: 1, restitution: 0.2 },
-    scene
-);
-
-// Initialize UI
-const ui = new UI();
-
-// Update progress bar
-let progress = 0;
-const updateProgress = () => {
-    progress += 10;
-    progressBar.style.width = `${progress}%`;
-    if (progress < 100) {
-        setTimeout(updateProgress, 100);
-    } else {
-        loadingScreenDiv.style.display = 'none';
+/**
+ * Da color a un peleador. El .glb del mannequin trae su propio material y
+ * un solo color para los dos peleadores seria ilegible en combate.
+ */
+function tint(model, [r, g, b]) {
+    for (const mesh of model.root.getChildMeshes ? model.root.getChildMeshes() : []) {
+        const m = new B.StandardMaterial('skin', scene);
+        m.diffuseColor = new B.Color3(r, g, b);
+        m.specularColor = new B.Color3(0.12, 0.12, 0.14);
+        m.specularPower = 24;
+        mesh.material = m;
     }
-};
+}
 
-// Start progress bar
-updateProgress();
+/**
+ * Postura inicial de cada peleador.
+ *
+ * NO es una animacion: es la Pose de una postura de cine (core/cine/Stances.js)
+ * con los pies ya clavados en el suelo por IK. Lo que se ve aqui es el
+ * resultado de medir el modelo, decidir los dos puntos de apoyo y resolver las
+ * dos piernas contra ellos, no un numero de rotaciones escrito a mano.
+ */
+function adoptStance(fighter, stanceName) {
+    const model = fighter.model;
+    const { pose, state } = stancePose(model.rig, stanceName || 'IDLE', { forward: 1 });
+    model.applyPose(pose, state);
+    fighter.pose = pose;
+    fighter.fkState = state;
+    fighter.stance = stanceName || 'IDLE';
+}
 
-// Bucle de renderizado
-engine.runRenderLoop(() => {
+// ===========================================================================
+// 6. INTERFAZ
+// ===========================================================================
+
+let ui = null;
+
+// ===========================================================================
+// ARRANQUE
+// ===========================================================================
+
+async function boot() {
+    // --- Peleadores -------------------------------------------------------
+    for (const f of fighters) {
+        try {
+            f.model = await loadCharacterModel(scene, MODEL_URL, { name: f.name });
+        } catch (err) {
+            console.error('No se pudo cargar ' + MODEL_URL, err);
+            // Un modelo que no carga NO puede ser un problema que tumbe el
+            // juego entero: se avisa y se sigue con lo que haya.
+            f.failed = true;
+            continue;
+        }
+        tint(f.model, f.color);
+        adoptStance(f, 'GUARD');
+        // Cada peleador en su esquina, mirando al centro.
+        f.model.place(f.x, f.z, f.facing);
+        loading.setProgress((fighters.indexOf(f) + 1) / fighters.length);
+    }
+    loading.step('luchadores');
+
+    // --- Interfaz ---------------------------------------------------------
+    ui = new UI();
+    loading.step('interfaz');
+
+    loading.finish();
+    await loading.whenStarted();
+
+    // --- Bucle ------------------------------------------------------------
+    engine.runRenderLoop(render);
+    window.addEventListener('resize', () => engine.resize());
+}
+
+// Un frame. Hoy es "dibujar y nada mas": el cubo tambien solo se dibujaba, lo
+// que cambia es que lo que hay en pantalla son dos peleadores de 1,80 m.
+function render() {
     scene.render();
+}
 
-    // Update box position based on touch controls
-    const movementVector = ui.getMovementVector();
-    if (movementVector.x !== 0 || movementVector.y !== 0) {
-        box.position.x += movementVector.x * 0.1;
-        box.position.z += movementVector.y * 0.1;
-    }
+// Arranca en cuanto el DOM esta listo (el script es un modulo, asi que ya lo
+// esta, pero por si se carga con defer o en el head).
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+} else {
+    boot();
+}
 
-    // Handle button actions
-    const activeButtons = ui.getActiveButtons();
-    if (activeButtons.includes('attack1')) {
-        console.log('Attack 1 pressed');
-    }
-    if (activeButtons.includes('attack2')) {
-        console.log('Attack 2 pressed');
-    }
-    if (activeButtons.includes('block')) {
-        console.log('Block pressed');
-    }
-    if (activeButtons.includes('action')) {
-        console.log('Action pressed');
-    }
-});
-
-// Ajustar tamaño al rotar pantalla
-window.addEventListener("resize", () => {
-    engine.resize();
-});
+// Para depurar desde la consola del navegador.
+window.SANPABLERA = { engine, scene, camera, fighters, loading, ground };

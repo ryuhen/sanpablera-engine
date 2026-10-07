@@ -79,6 +79,17 @@ export function qnorm(q) {
     return l > 1e-9 ? [q[0] / l, q[1] / l, q[2] / l, q[3] / l] : qIdentity();
 }
 
+/**
+ * Conjugado = quaternion inversa de una rotacion.
+ *
+ * POR QUE ESTA AQUI Y NO SE CALCULA EN CADA POSE: convertir una rotacion MUNDIAL
+ * en la rotacion LOCAL de un hueso es `local = qinv(padre) * mundial`. Como el
+ * conjugado de un quaternion unitario es su negativo en la parte vectorial, sale
+ * de multiplicar el conjugado del padre por la rotacion mundial. Sin esto, el
+ * IK de las piernas no tendria forma de escribir los huesos.
+ */
+export const qinv = (q) => [-q[0], -q[1], -q[2], q[3]];
+
 export function qFromAxisAngle(axis, angle) {
     const a = vnorm(axis);
     const h = angle * 0.5;
@@ -136,6 +147,49 @@ export function qAngleAround(q, axis) {
     const d = vdot([q[0], q[1], q[2]], a);
     return 2 * Math.atan2(d, q[3]);
 }
+
+/** Rota un vector con un quaternion. Es `v + 2 * qv x (qv x v + w * v)`. */
+export function qRotateVec(q, v) {
+    const [x, y, z, w] = q;
+    const tx = 2 * (y * v[2] - z * v[1]);
+    const ty = 2 * (z * v[0] - x * v[2]);
+    const tz = 2 * (x * v[1] - y * v[0]);
+    return [
+        v[0] + w * tx + (y * tz - z * ty),
+        v[1] + w * ty + (z * tx - x * tz),
+        v[2] + w * tz + (x * ty - y * tx)
+    ];
+}
+
+/**
+ * Quaternion minimo que lleva el vector `from` al vector `to` (ambos no nulos).
+ *
+ * ES LA PIEZA CENTRAL DEL IK. Una articulacion de dos huesos tiene que apuntar
+ * SU EJE en una direccion concreta; eso es exactamente "gira `from` hasta `to`".
+ * Se usa el caso degenerado antiparalelo (from = -to), donde la formula general
+ * da un quaternion degenerado y hay que elegir cualquier eje perpendicular.
+ */
+export function qFromTo(from, to) {
+    const a = vnorm(from);
+    const b = vnorm(to);
+    const d = vdot(a, b);
+    if (d > 0.999999) return qIdentity();
+    if (d < -0.999999) {
+        // Antiparalelo: cualquier giro de 180 grados vale. Se elige un eje
+        // perpendicular porque en el plano de las piernas casi siempre lo hay.
+        let axis = vcross(a, [1, 0, 0]);
+        if (vlen(axis) < 1e-6) axis = vcross(a, [0, 0, 1]);
+        return qFromAxisAngle(axis, Math.PI);
+    }
+    const c = vcross(a, b);
+    return qnorm([c[0], c[1], c[2], 1 + d]);
+}
+
+/**
+ * Convierte una rotacion MUNDIAL a la rotacion LOCAL de un hijo, dado el
+ * quaternion mundial del padre. `local = qinv(padreMundial) * hijoMundial`.
+ */
+export const qWorldToLocal = (parentWorld, childWorld) => qmul(qinv(parentWorld), childWorld);
 
 // ===========================================================================
 // MATRICES 4x4  (column-major: m[column * 4 + row])
