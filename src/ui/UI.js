@@ -3,46 +3,14 @@ import TouchControls from './TouchControls.js';
 class UI {
   constructor() {
     this.touchControls = new TouchControls();
-    this.health = 100;
     this.initUI();
   }
 
   initUI() {
-    // Create UI elements
-    this.createHealthBar();
+    // El HUD de combate (barras de vida y recurso) vive en HUD.js. Aqui solo
+    // se montan los controles tactiles.
     this.createDpad();
     this.createActionButtons();
-  }
-
-  createHealthBar() {
-    // Create health bar container
-    const healthBarContainer = document.createElement('div');
-    healthBarContainer.id = 'health-bar-container';
-    healthBarContainer.style.position = 'absolute';
-    healthBarContainer.style.top = '20px';
-    healthBarContainer.style.left = '20px';
-    healthBarContainer.style.width = '30px';
-    healthBarContainer.style.height = '200px';
-    healthBarContainer.style.backgroundColor = '#333';
-    healthBarContainer.style.borderRadius = '5px';
-    document.body.appendChild(healthBarContainer);
-
-    // Create health bar
-    this.healthBar = document.createElement('div');
-    this.healthBar.id = 'health-bar';
-    this.healthBar.style.position = 'absolute';
-    this.healthBar.style.bottom = '0';
-    this.healthBar.style.left = '0';
-    this.healthBar.style.width = '100%';
-    this.healthBar.style.height = `${this.health}%`;
-    this.healthBar.style.backgroundColor = '#f00';
-    this.healthBar.style.borderRadius = '5px';
-    healthBarContainer.appendChild(this.healthBar);
-  }
-
-  updateHealth(health) {
-    this.health = health;
-    this.healthBar.style.height = `${this.health}%`;
   }
 
   createDpad() {

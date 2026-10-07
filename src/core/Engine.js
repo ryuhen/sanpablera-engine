@@ -37,6 +37,7 @@
  */
 
 import UI from '../ui/UI.js';
+import HUD from '../ui/HUD.js';
 import LoadingScreen from '../ui/LoadingScreen.js';
 import { loadCharacterModel } from '../render/CharacterModel.js';
 import { stancePose } from './cine/Stances.js';
@@ -147,6 +148,10 @@ function makeFighter(spec) {
         x: spec.x,
         z: spec.z,
         facing: spec.facing,
+        // Estado de combate del peleador. El HUD lo lee cada frame; el FSM
+        // (core/fsm) lo modificara cuando se ligue el combate logico.
+        health: 100,
+        meter: 0,
         // Cadencia de la interpolacion de poses.
         fkState: null
     });
@@ -167,6 +172,12 @@ function tint(model, [r, g, b]) {
         m.specularPower = 24;
         mesh.material = m;
     }
+}
+
+// Color [r,g,b] (0..1) de la FIGHTERS a hex, para la etiqueta del HUD.
+function hexOf([r, g, b]) {
+    const to = (c) => Math.round(c * 255).toString(16).padStart(2, '0');
+    return '#' + to(r) + to(g) + to(b);
 }
 
 /**
@@ -191,6 +202,7 @@ function adoptStance(fighter, stanceName) {
 // ===========================================================================
 
 let ui = null;
+let hud = null;
 
 // ===========================================================================
 // ARRANQUE
@@ -218,6 +230,15 @@ async function boot() {
 
     // --- Interfaz ---------------------------------------------------------
     ui = new UI();
+    hud = new HUD({
+        fighters: FIGHTERS.map(f => ({
+            id: f.name,
+            label: f.name,
+            color: hexOf(f.color),
+            health: fighters.find(fg => fg.name === f.name).health,
+            meter: fighters.find(fg => fg.name === f.name).meter
+        }))
+    });
     loading.step('interfaz');
 
     loading.finish();
@@ -228,10 +249,16 @@ async function boot() {
     window.addEventListener('resize', () => engine.resize());
 }
 
-// Un frame. Hoy es "dibujar y nada mas": el cubo tambien solo se dibujaba, lo
-// que cambia es que lo que hay en pantalla son dos peleadores de 1,80 m.
+// Un frame: dibujar la escena y volcar el estado de combate al HUD.
 function render() {
     scene.render();
+
+    if (hud) {
+        for (const f of fighters) {
+            hud.update(f.name, { health: f.health, meter: f.meter });
+        }
+        hud.tick(engine.getDeltaTime());
+    }
 }
 
 // Arranca en cuanto el DOM esta listo (el script es un modulo, asi que ya lo
@@ -243,4 +270,17 @@ if (document.readyState === 'loading') {
 }
 
 // Para depurar desde la consola del navegador.
-window.SANPABLERA = { engine, scene, camera, fighters, loading, ground };
+window.SANPABLERA = { engine, scene, camera, fighters, loading, ground, hud };
+
+// Helpers de debug del HUD: probar el comportamiento "en tiempo real" de las
+// barras sin esperar a tener combate logico ligado.
+window.SANPABLERA.setHealth = function (name, value) {
+    const f = fighters.find(x => x.name === name);
+    if (!f) return;
+    f.health = Math.max(0, Math.min(100, value));
+};
+window.SANPABLERA.setMeter = function (name, value) {
+    const f = fighters.find(x => x.name === name);
+    if (!f) return;
+    f.meter = Math.max(0, Math.min(100, value));
+};
