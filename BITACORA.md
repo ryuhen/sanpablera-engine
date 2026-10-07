@@ -8,13 +8,17 @@ Esta bitácora nos permite registrar y sincronizar las actividades realizadas en
 |---|---|---|---|---|
 | 2025-10-04 | Sistema | `a6c6aa1` | Revisión inicial del proyecto | Se analizaron archivos HTML, JS y estructura del proyecto |
 | 2026-10-04 | Sistema | `d96057b` | Recuperación de trabajo perdido | La FSM solo existía en el árbol local sin commitear: recuperación de 5.351 líneas. Se corrigió la ruta de `aiAssistant.js` en `index.html` (`./src/tools/aiAssistant.js`) y se añadieron los scripts `start` y `test` a `package.json` |
-| 2026-10-04 | Sistema | `afd2d06` | Integración de la rama de respaldo | Merge de `backup/github-babylon-2026-10-04`. Se conservaron sus stubs (`index.ts`, `Src/index.ts`) y se descartaron las copias vendorizadas de Babylon (idénticas a `node_modules/babylonjs/`). **Advertencia:** esos stubs importan `core/Legacy/legacy`, que no existe |
+| 2026-10-04 | Sistema | `afd2d06` | Integración de la rama de respaldo | Merge de `backup/github-babylon-2026-10-04`. Se conservaron sus stubs (`index.ts`, `Src/index.ts`) y se descartaron las copias vendorizadas de Babylon (idénticas a `node_modules/babylonjs/`). **Advertencia:** esos stubs importaban `core/Legacy/legacy`, que no existe |
 | 2026-10-05 | Sistema | `0101f12` | Corrección de la FSM (6 bugs) | `_clearRequests()` al reiniciar sesión · orden del tope/decaimiento de presión · overrides `null` en `GrappleStates` · coste del especial vía `ctx.affordable()` · tier solicitado en APC vía `ctx.requestedTier` · payload del hit propagado a los handlers · entrada de intents desde `DOWNED` · asserts de clips indexados por `SPF.VisualFacing`. **64 ok, 0 fallos** |
 | 2026-10-05 | Sistema | *este commit* | Base matemática y de contrato del rig | `src/core/cine/Math3.js` (vectores, quaternions, matrices column-major, damping independiente del framerate, 7 curvas de easing) y `src/core/cine/CineConstants.js` (CFG a 60 Hz, 21 huesos del esqueleto humanoide con el CONTRATO documentado, 10 canales, 9 morphs de física, 6 presets de impacto, planos y transiciones). Se corrigió `Side.NONE`, que existía en la API pero no se usaba en los 5 huesos axiales |
 | 2026-10-05 | Sistema | *este commit* | Modelo humanoide con rigging (sustituye al cubo) | Búsqueda y selección de asset: `assets/characters/mannequin.glb` = "Rigged Figure" de Khronos (antes CesiumMan), **CC BY 4.0**, 50 KB, malla skinned con 19 huesos y 1 clip. Se verificó numéricamente que el archivo es Z-up y que con `rot.x = -π/2` el personaje queda de pie (cabeza 0,507 m sobre caderas, caderas 0,601 m sobre los pies). Créditos en `assets/ATTRIBUTIONS.md`. Se añadió `src/render/BoneMap.js`, que traduce los nombres de hueso de cualquier modelo al CONTRATO (alias de Khronos, Mixamo con y sin prefijo, y genéricos de Kenney/Quaternius/RPM) |
-| 2026-10-05 | Sistema | *este commit* | Pruebas y serving de assets | `tests/cine.smoke.mjs` (**333 comprobaciones, 0 fallos**), incluida la verificación del `.glb` real del repo. `npm test` ejecuta las dos suites (64 + 333 = 397). `server.js` sirve `.glb/.gltf/.bin/.ktx2/.fbx` |
+| 2026-10-05 | Sistema | *este commit* | Pruebas y serving de assets | `tests/cine.smoke.mjs` (**333 comprobaciones, 0 fallos**), incluida la verificación del `.glb` real del repo. `npm test` ejecuta las suites. `server.js` sirve `.glb/.gltf/.bin/.ktx2/.fbx` |
 | 2026-10-05 | Sistema | `80a3bd9` | Integración del remoto | El remoto tenía 8 commits que no eran ancestros del `main` local. Fusionados; los conflictos add/add de `BITACORA.md`, `index.html` y `server.js` se resolvieron con la versión local (la última modificada). A partir de aquí el push es fast-forward y no hace falta force-push |
 | 2026-10-05 | Sistema | *este commit* | Bitácora del bloqueo del push | Se documenta cómo desbloquear el push a `ryuhen/sanpablera-engine`: la clave pública que hay que registrar en GitHub y la alternativa por token HTTPS |
+| 2026-10-06 | Sistema | `44e2505` | Rig, poses, stances y modelo humanoide | `cine/Rig.js` (esqueleto vivo: FK, IK de dos huesos y plantado de pies), `cine/Pose.js` (poses como deltas de la pose de reposo), `cine/Stances.js` (posturas de combate derivadas de parámetros), `render/CharacterModel.js` (puente entre el rig numérico y los nodos de Babylon) y `tests/glb.mjs` (lector GLB mínimo). **Se quitó el cubo placeholder de `Engine.js`** |
+| 2026-10-06 | Sistema | `25509b9` | HUD de combate (spec sección 3) | `ui/HUD.js`: barras de vida y de recurso por luchador, ancladas al centro (P1 a la derecha, P2 a la izquierda), con lerp independiente del framerate, color por umbrales y pulso de vida baja. `ui/UI.js` dejó de dibujar la barra vertical heredada. `Engine.js` crea el HUD, da salud y barra a cada peleador y expone `setHealth`/`setMeter` para debug |
+| 2026-10-06 | Sistema | `75b8437` | HUD estilo SF2, stamina y menús | Dos barras de vida arriba, tiempo al centro y stamina bajo el nombre de cada luchador; economía de stamina (1x hacia el rival, 1.5x alejándose, 0 lateral, regen al parar; parkour: rebote 8 / deslizar 14); cámara que encuadra siempre a ambos peleadores; `SelectScreen` (8 celdas de panal) y `StageSelect` (libro de origami, de momento solo Dojo Origami); `roster.js` y `stages.js`; fix del cargador glTF (`babylonjs-loaders`) en `index.html` |
+| 2026-10-07 | Sistema | *este commit* | Bitácora al día y limpieza de stubs | Se registran los 3 commits del 06-10, se tacha lo hecho y se reevalúa lo que queda de verdad. Se borran los stubs rotos `index.ts` y `Src/index.ts` (importaban `core/Legacy/legacy`, que no existe; nada los usaba). Se cierra el bloqueo del push: ya está resuelto |
 
 ### Cómo se comprobó que el modelo es un humano de pie
 
@@ -49,66 +53,61 @@ pendiente la confirmación visual en el navegador.
 - [x] Buscar y traer un humanoide con rigging con licencia redistribuible
 - [x] `BoneMap.js` para que el motor no dependa de los nombres de un modelo
 - [x] Servir `.glb` desde `server.js`
+- [x] `CharacterModel.js`: cargador con Babylon (`rot.x = -π/2`, escala a `CFG.CHARACTER_HEIGHT`, `BoneMap` sobre los nodos reales, clips)
+- [x] Quitar el cubo placeholder de `Engine.js`
+- [x] `cine/Rig.js` (FK, IK de dos huesos, plantado de pies), `cine/Pose.js` (deltas) y `cine/Stances.js` (posturas por parámetros)
+- [x] HUD de combate y estilo SF2: barras de vida, timer y stamina (spec sección 3)
+- [x] Economía de stamina al correr y en parkour (`combat/Stamina.js`)
+- [x] Pantallas de selección de peleador (`SelectScreen`) y de escenario (`StageSelect`)
+- [x] Cámara que encuadra siempre a ambos peleadores (`Engine.js`, `fitCamera`)
+- [x] UI táctil (spec sección 1): `TouchControls.js` + botones DOM en `UI.js` (pad de 8 direcciones y 4 acciones con eventos touch)
+- [x] Borrar los stubs rotos `index.ts` y `Src/index.ts` (importaban `core/Legacy/legacy`)
+- [x] `npm test` en verde: **446 comprobaciones, 0 fallos** (FSM 64 · Cine 333 · HUD 23 · Stamina 26)
 
 ### Pendiente (siguiente sesión)
 
-- [ ] **`src/render/CharacterModel.js`**: el cargador con Babylon (el módulo
-      *todavía no existe*). Debe aplicar `rot.x = -π/2`, normalizar la escala a
-      `CFG.CHARACTER_HEIGHT`, resolver `BoneMap` sobre los nodos reales y
-      exponer clips.
-- [ ] **Quitar el cubo placeholder de `src/core/Engine.js`** y poner al personaje
-      en su lugar (sigue ahí; el modelo está en el repo pero no se carga).
 - [ ] **Confirmar el personaje en el navegador** (la validación hecha es
-      numérica, no visual).
-- [ ] `src/core/cine/Rig.js`: aplicar poses por nombre del contrato, FK e IK de
-      dos huesos, yRoots de contacto para los pies.
-- [ ] Sistema de morphs de física (muelle + amortiguación) sobre `MorphId`.
-- [ ] Cámara: planos (`ShotSize`) y movimientos (`CameraMove`) sobre Babylon.
-- [ ] Sistema de vistas/escenario.
-- [ ] Animaciones: importar y mezclar clips,IK y root motion.
-- [ ] Timeline de clips y transiciones (`TransitionKind`).
-- [ ] Impactos: hitstop, temblor de cámara y morphs por `IMPACT_PRESETS`.
-- [ ] UI táctil de botones (pad de 8 direcciones + 4 acciones) y HUD con barras
-      de vida y recursos, según `Specs.txt`.
-- [ ] Migrar el HUD/IA de `Legacy` a los módulos actuales.
-- [ ] `index.ts` y `Src/index.ts` importan `core/Legacy/legacy`, que no existe:
-      hay que arreglarlos o borrarlos.
+      numérica, no visual): `npm start` y ver el mannequin de pie, los
+      colores por peleador, el HUD y las pantallas de selección.
+- [ ] **Sistema de morphs de física** (muelle + amortiguación) sobre
+      `MorphId`. Los 9 morphs ya están definidos en `CineConstants.js`;
+      falta el runtime.
+- [ ] **Ejecutor de impactos**: hitstop, temblor de cámara y morphs por
+      `IMPACT_PRESETS`. Los valores de `hitstop` ya están en `MoveTable.js`
+      y los estados en `fsm/states/ImpactStates.js`; falta quien los aplique.
+- [ ] **Cámara cinematográfica**: planos (`ShotSize`) y movimientos
+      (`CameraMove`) sobre Babylon. La cámara de encuadre ya existe; falta
+      la parte cinematográfica.
+- [ ] **Animaciones**: importar y mezclar clips, IK y root motion (el
+      mannequin trae un solo clip).
+- [ ] **Timeline de clips y transiciones** (`TransitionKind`).
+- [ ] **Migrar la IA de `Legacy`** a los módulos actuales (el HUD ya está
+      migrado; `aiAssistant.js` carga sin errores).
 - [ ] `Specs.txt` se ha guardado en el repo sin interpretar: sus 6 secciones
-      (controles, cámara, HUD, FSM, hit levels, stances) son el trabajo grande que
-      queda.
+      (controles, cámara, HUD, FSM, hit levels, stances) son el trabajo grande
+      que queda.
 
 ### Bloqueos
 
-- **`git push` a `ryuhen/sanpablera-engine` sigue sin poder hacerse: no hay
-  autenticación válida.** Probadas las dos vías:
-  - SSH: `git@github.com: Permission denied (publickey)`. Existe
-    `/root/.ssh/id_ed25519_github` y `~/.ssh/config` ya apunta a ella
-    (`IdentitiesOnly yes`), pero **GitHub no reconoce esa clave pública**, así
-    que la clave no está dada de alta en la cuenta.
-  - HTTPS: `fatal: could not read Username for 'https://github.com'`. No hay
-    token ni credenciales guardadas, y no se puede pedir usuario de forma
-    interactiva.
-  - `gh` CLI no está instalado y no hay variables de GitHub en el entorno.
-
-  **Cómo desbloquearlo (una de dos):**
-  1. Añadir esta clave pública en GitHub → *Settings* → *SSH and GPG keys* →
-     *New SSH key*:
-     ```
-     ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILJAKSVzAIc9H9K0pPiDWlCgy6JG5CXPY5q6X3ifpoZ0 ryuhen@sanpablera-engine
-     ```
-  2. O crear un token personal con permiso `repo` y pushing por HTTPS:
-     ```
-     git remote set-url origin https://<usuario>:<token>@github.com/ryuhen/sanpablera-engine.git
-     ```
-
-  En cuanto haya una de las dos, el push es un fast-forward y no hace falta
-  nada más: los 8 commits del remoto ya están fusionados en el grafo local.
+- ~~**`git push` a `ryuhen/sanpablera-engine` sigue sin poder hacerse: no hay
+   autenticación válida.**~~ **RESUELTO (2026-10-06):** el push funciona y
+   `main` está al día con `origin/main`. Se conserva la nota original por si
+   vuelve a fallar la autenticación:
+   1. Añadir esta clave pública en GitHub → *Settings* → *SSH and GPG keys* →
+      *New SSH key*:
+      ```
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILJAKSVzAIc9H9K0pPiDWlCgy6JG5CXPY5q6X3ifpoZ0 ryuhen@sanpablera-engine
+      ```
+   2. O crear un token personal con permiso `repo` y pushing por HTTPS:
+      ```
+      git remote set-url origin https://<usuario>:<token>@github.com/ryuhen/sanpablera-engine.git
+      ```
 
 ### Lo que falta para que el remoto reciba el trabajo
 
-- [ ] Autenticar el push (ver arriba). Todo lo demás ya está listo: 6 commits
-      locales por delante, el remoto integrado y el árbol limpio.
+- [x] Autenticar el push. **Resuelto**: todo el trabajo local ya está en
+      `origin/main`; el árbol está limpio y no hace falta force-push.
 
 ---
 
-*Última actualización: 2026-10-05*
+*Última actualización: 2026-10-07*
