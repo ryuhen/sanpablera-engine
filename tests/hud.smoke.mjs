@@ -13,7 +13,7 @@
  * ============================================================================
  */
 import {
-    clampStat, barColor, LOW_HEALTH_THRESHOLD, MAX_STAT
+    clampStat, barColor, LOW_HEALTH_THRESHOLD, MAX_STAT, formatTimer
 } from '../src/ui/HUD.js';
 
 let pass = 0;
@@ -54,6 +54,15 @@ run('barColor', () => {
     ok(barColor(1) !== barColor(0.5) && barColor(0.5) !== barColor(0.1), 'los tres estados son distinguibles');
     ok(barColor(0) === '#5c1518', 'a cero queda un rojo oscuro muerto');
     ok(barColor(-1) === '#5c1518', 'ratio negativo cae en el mismo color que 0');
+});
+
+run('formatTimer', () => {
+    ok(formatTimer(99) === '99', '99 segundos -> "99"');
+    ok(formatTimer(7) === '07', 'un digito se rellena a dos');
+    ok(formatTimer(0) === '00', 'cero -> "00"');
+    ok(formatTimer(-3) === '00', 'negativo nunca baja de 00');
+    ok(formatTimer(120.7) === '120', 'se trunca a segundos enteros');
+    ok(formatTimer(5.99) === '05', '5.99 -> 05 (no redondea arriba)');
 });
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,9 @@
     </style>
     <!-- 1. Cargar Babylon.js -->
     <script src="./node_modules/babylonjs/babylon.js"></script>
+    <!-- 1b. Cargador glTF/GLB: el babylon.js base NO sabe leer .glb. Sin este
+         script el mannequin de assets/characters/mannequin.glb jamas se ve. -->
+    <script src="./node_modules/babylonjs-loaders/babylon.glTF2FileLoader.js"></script>
     <!-- 2. Cargar el motor de físicas Cannon.js (Necesario para las colisiones y la gravedad) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
 </head>

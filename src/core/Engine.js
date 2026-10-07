@@ -39,13 +39,21 @@
 import UI from '../ui/UI.js';
 import HUD from '../ui/HUD.js';
 import LoadingScreen from '../ui/LoadingScreen.js';
+import SelectScreen from '../ui/SelectScreen.js';
+import StageSelect from '../ui/StageSelect.js';
 import { loadCharacterModel } from '../render/CharacterModel.js';
 import { stancePose } from './cine/Stances.js';
+import { StaminaGauge } from './combat/Stamina.js';
+import { ROSTER } from './roster.js';
+import { STAGES } from './stages.js';
 
 const MODEL_URL = './assets/characters/mannequin.glb';
-const FIGHTERS = [
-    { name: 'P1', x: -0.55, z: 0.45, facing: 0, color: [0.30, 0.55, 1.00] },
-    { name: 'P2', x: 0.55, z: -0.45, facing: Math.PI, color: [1.00, 0.42, 0.35] }
+// Las dos esquinas del ring. P1 a la izquierda mirando al centro, P2 a la
+// derecha mirando al centro. Quien ocupa cada esquina se elige en la pantalla
+// de seleccion (SelectScreen), no aqui.
+const FIGHTER_CORNERS = [
+    { name: 'P1', x: -0.55, z: 0.45, facing: 0 },
+    { name: 'P2', x: 0.55, z: -0.45, facing: Math.PI }
 ];
 
 // ===========================================================================
@@ -139,26 +147,37 @@ camera.wheelDeltaPercentage = 0.02;
 // ===========================================================================
 
 /**
- * Peleador de escena: envuelve un CharacterModel con lo que el juego necesita
- * saber de el (donde esta, hacia donde mira, el ultimo FSM, etc). La logica de
- * combate va en core/fsm; aqui solo hay estado de render.
+ * Peleador de escena: envuelve una carta del roster (color, nombre, perfil
+ * FSM) con lo que el juego necesita saber de el (donde esta, hacia donde
+ * mira, stamina...). Se crea DESPUES de la pantalla de seleccion, cuando ya
+ * se sabe quien pelea en cada esquina.
  */
-function makeFighter(spec) {
-    const f = Object.assign({}, spec, {
-        x: spec.x,
-        z: spec.z,
-        facing: spec.facing,
+function makeFighter(slot, side) {
+    const corner = FIGHTER_CORNERS[side];
+    const f = {
+        name: corner.name,
+        displayName: slot.name,
+        characterId: slot.characterId,
+        color: slot.rgb,
+        x: corner.x,
+        z: corner.z,
+        facing: corner.facing,
         // Estado de combate del peleador. El HUD lo lee cada frame; el FSM
         // (core/fsm) lo modificara cuando se ligue el combate logico.
         health: 100,
-        meter: 0,
+        // Barra de stamina (core/combat/Stamina.js): se consume al correr y
+        // en parkour, se regenera al parar. El HUD la dibuja bajo su nombre.
+        gauge: new StaminaGauge(),
+        // null = parado (mira al rival). { vx, vz } = corriendo hacia ese
+        // rumbo (mira hacia donde corre, no al rival).
+        running: null,
         // Cadencia de la interpolacion de poses.
         fkState: null
-    });
+    };
     return f;
 }
 
-const fighters = FIGHTERS.map(makeFighter);
+const fighters = [];
 
 /**
  * Da color a un peleador. El .glb del mannequin trae su propio material y
@@ -174,7 +193,7 @@ function tint(model, [r, g, b]) {
     }
 }
 
-// Color [r,g,b] (0..1) de la FIGHTERS a hex, para la etiqueta del HUD.
+// Color [r,g,b] (0..1) del roster a hex, para la etiqueta del HUD.
 function hexOf([r, g, b]) {
     const to = (c) => Math.round(c * 255).toString(16).padStart(2, '0');
     return '#' + to(r) + to(g) + to(b);
@@ -197,6 +216,18 @@ function adoptStance(fighter, stanceName) {
     fighter.stance = stanceName || 'IDLE';
 }
 
+/**
+ * Pinta el escenario con la paleta de la carta elegida (spec: el escenario
+ * sale de la pantalla de seleccion estilo libro de origami).
+ */
+function applyStageTheme(stage) {
+    if (!stage) return;
+    ground.material.diffuseColor = B.Color3.FromHexString(stage.ground);
+    mat.material.diffuseColor = B.Color3.FromHexString(stage.mat);
+    railMat.diffuseColor = B.Color3.FromHexString(stage.rail);
+    hemi.groundColor.copyFrom(B.Color3.FromHexString(stage.wall));
+}
+
 // ===========================================================================
 // 6. INTERFAZ
 // ===========================================================================
@@ -209,7 +240,23 @@ let hud = null;
 // ===========================================================================
 
 async function boot() {
-    // --- Peleadores -------------------------------------------------------
+    // La pantalla de carga llega a "Listo" y pide el gesto para empezar
+    // (pantalla completa + fundido). Hasta aqui NO hay peleadores: todavia no
+    // se sabe quien pelea.
+    loading.finish();
+    await loading.whenStarted();
+
+    // --- Seleccion de peleador (8 celdas, tipo panal) ----------------------
+    const selection = await new SelectScreen({ roster: ROSTER }).pick();
+
+    // --- Seleccion de escenario (libro de origami; solo 1 por ahora) -------
+    const { stage } = await new StageSelect({ stages: STAGES }).pick();
+    applyStageTheme(stage);
+
+    // --- Peleadores: se crean con la eleccion del jugador ------------------
+    fighters.push(makeFighter(selection.p1, 0));
+    fighters.push(makeFighter(selection.p2, 1));
+
     for (const f of fighters) {
         try {
             f.model = await loadCharacterModel(scene, MODEL_URL, { name: f.name });
@@ -224,40 +271,136 @@ async function boot() {
         adoptStance(f, 'GUARD');
         // Cada peleador en su esquina, mirando al centro.
         f.model.place(f.x, f.z, f.facing);
-        loading.setProgress((fighters.indexOf(f) + 1) / fighters.length);
     }
-    loading.step('luchadores');
 
     // --- Interfaz ---------------------------------------------------------
     ui = new UI();
     hud = new HUD({
-        fighters: FIGHTERS.map(f => ({
+        fighters: fighters.map(f => ({
             id: f.name,
-            label: f.name,
+            label: f.displayName,
             color: hexOf(f.color),
-            health: fighters.find(fg => fg.name === f.name).health,
-            meter: fighters.find(fg => fg.name === f.name).meter
+            health: f.health,
+            stamina: f.gauge.value
         }))
     });
-    loading.step('interfaz');
-
-    loading.finish();
-    await loading.whenStarted();
 
     // --- Bucle ------------------------------------------------------------
     engine.runRenderLoop(render);
     window.addEventListener('resize', () => engine.resize());
 }
 
-// Un frame: dibujar la escena y volcar el estado de combate al HUD.
+// ===========================================================================
+// AVANCE DEL MUNDO (por ahora: correr y la camara que no pierde a nadie)
+// ===========================================================================
+
+// Dentro del ring: los peleadores no salen de este radio (suelo de 3,1 m).
+const RING_LIMIT = 2.8;
+// Distancia minima al rival: nadie se pisa para "meterse" en el otro.
+const MIN_SPACING = 0.9;
+
+function opponentOf(f) {
+    return f.name === fighters[0].name ? fighters[1] : fighters[0];
+}
+
+/** Rumbo que mira a la cara/pecho del rival (facing 0 = +Z). */
+function headingToward(f, o) {
+    if (!o) return f.facing;
+    return Math.atan2(o.x - f.x, o.z - f.z);
+}
+
+/**
+ * Un paso del mundo por frame. Hoy hace dos cosas:
+ *   - Ejecutar la carrera: mueve al peleador, lo GIRA hacia donde corre (no
+ *     hacia el rival) y drena la stamina segun la direccion del rumbo.
+ *   - Al pararse, gira hacia el rival (le mira la cara/pecho) y regenera.
+ * Cuando exista la logica de combate real (FSM), el movimiento y los gastos
+ * de stamina los dirigira el input, no el debug.
+ */
+function advance(dt) {
+    for (const f of fighters) {
+        const o = opponentOf(f);
+        const run = f.running;
+
+        if (run) {
+            f.gauge.update(dt, {
+                running: true,
+                moveX: run.vx,
+                moveZ: run.vz,
+                toOppX: o.x - f.x,
+                toOppZ: o.z - f.z
+            });
+
+            // Sin stamina no hay carrera: se frena en seco (gira al rival).
+            if (!f.gauge.canRun()) {
+                f.running = null;
+                if (f.model) f.model.place(f.x, f.z, headingToward(f, o));
+                continue;
+            }
+
+            let nx = f.x + run.vx * dt;
+            let nz = f.z + run.vz * dt;
+
+            // Dentro del ring.
+            const radius = Math.hypot(nx, nz);
+            if (radius > RING_LIMIT) {
+                nx *= RING_LIMIT / radius;
+                nz *= RING_LIMIT / radius;
+            }
+            // Sin pisar al rival.
+            const dox = o.x - nx;
+            const doz = o.z - nz;
+            const dist = Math.hypot(dox, doz);
+            if (dist < MIN_SPACING) {
+                nx = o.x - (dox / dist) * MIN_SPACING;
+                nz = o.z - (doz / dist) * MIN_SPACING;
+            }
+
+            f.x = nx;
+            f.z = nz;
+            if (f.model) {
+                // El corredor mira hacia DONDE CORRE (spec: no a la cara del
+                // rival, no al pecho: al rumbo).
+                f.model.place(f.x, f.z, Math.atan2(run.vx, run.vz));
+            }
+        } else {
+            f.gauge.update(dt, { running: false });
+            if (f.model) f.model.place(f.x, f.z, headingToward(f, o));
+        }
+    }
+}
+
+/**
+ * Camara que encuadra SIEMPRE a los dos peleadores (spec: se amplia para
+ * mostrar a ambos). Apunta al punto medio y ajusta el radio para que quepan,
+ * sea cual sea la distancia entre ellos (incluso en medio de una huida).
+ */
+function fitCamera(dt) {
+    const alive = fighters.filter(f => f.model);
+    if (alive.length < 2) return;
+
+    const [a, b] = alive;
+    const mx = (a.x + b.x) / 2;
+    const mz = (a.z + b.z) / 2;
+    const span = Math.hypot(a.x - b.x, a.z - b.z);
+
+    camera.setTarget(new B.Vector3(mx, 1.0, mz));
+    const target = Math.max(4.2, span * 0.9 + 3.0);
+    camera.radius += (target - camera.radius) * (1 - Math.exp(-dt * 3));
+}
+
+// Un frame: avanzar el mundo, encuadrar, dibujar y volcar el combate al HUD.
 function render() {
+    const dt = engine.getDeltaTime();
+    advance(dt);
+    fitCamera(dt);
     scene.render();
 
     if (hud) {
         for (const f of fighters) {
-            hud.update(f.name, { health: f.health, meter: f.meter });
+            hud.update(f.name, { health: f.health, stamina: f.gauge.value });
         }
-        hud.tick(engine.getDeltaTime());
+        hud.tick(dt);
     }
 }
 
@@ -272,15 +415,45 @@ if (document.readyState === 'loading') {
 // Para depurar desde la consola del navegador.
 window.SANPABLERA = { engine, scene, camera, fighters, loading, ground, hud };
 
-// Helpers de debug del HUD: probar el comportamiento "en tiempo real" de las
-// barras sin esperar a tener combate logico ligado.
+// Helpers de debug: probar barras, carrera y stamina en tiempo real sin
+// esperar a tener input y combate logico ligados.
 window.SANPABLERA.setHealth = function (name, value) {
     const f = fighters.find(x => x.name === name);
     if (!f) return;
     f.health = Math.max(0, Math.min(100, value));
 };
-window.SANPABLERA.setMeter = function (name, value) {
+
+window.SANPABLERA.setStamina = function (name, value) {
     const f = fighters.find(x => x.name === name);
     if (!f) return;
-    f.meter = Math.max(0, Math.min(100, value));
+    f.gauge.reset(value);
+};
+
+// Corre hacia el rumbo (dx,dz) a `speed` m/s. Mientras corre mira hacia
+// donde va y quema stamina. Con (dx,dz)=(0,0) simplemente se detiene.
+window.SANPABLERA.run = function (name, dx, dz, speed = 3.5) {
+    const f = fighters.find(x => x.name === name);
+    if (!f) return;
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-4) {
+        f.running = null;
+        return;
+    }
+    f.running = { vx: (dx / len) * speed, vz: (dz / len) * speed };
+};
+
+window.SANPABLERA.stop = function (name) {
+    const f = fighters.find(x => x.name === name);
+    if (!f) return;
+    f.running = null;
+};
+
+// Intenta una maniobra de parkour (REBOTE / DESLIZAR). Devuelve true si se
+// pago con stamina y false si no quedaba.
+window.SANPABLERA.parkour = function (name, kind) {
+    const f = fighters.find(x => x.name === name);
+    if (!f) return false;
+    const ok = f.gauge.spendParkour(kind);
+    if (!ok) console.warn('stamina insuficiente para ' + kind + ' (' + f.gauge.value.toFixed(1) + ' pts)');
+    return ok;
 };

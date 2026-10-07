@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/hud.smoke.mjs && node tests/fsm.smoke.mjs && node tests/cine.smoke.mjs"
+    "test": "node tests/hud.smoke.mjs && node tests/stamina.smoke.mjs && node tests/fsm.smoke.mjs && node tests/cine.smoke.mjs"
   },
   "dependencies": {
-    "babylonjs": "^9.23.0"
+    "babylonjs": "^9.23.0",
+    "babylonjs-loaders": "^9.23.0"
   }
 }
