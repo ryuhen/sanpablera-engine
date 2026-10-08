@@ -198,15 +198,19 @@ function fakeFighter(id) {
 // ---------------------------------------------------------------------------
 section('4. Stances propios de cada peleador');
 const defineState = catalog.defineState;
-for (const id of ['SAN_PABLO', 'MALON']) {
+for (const id of ['PEDRO', 'JUAN']) {
     const own = registerCharacterStances(id, defineState);
     check(id + ' tiene stances propios', own.length >= 3, own.length);
 }
-const sanPabloMoves = MoveTable.getMoves('SAN_PABLO');
-check('San Pablo tiene golpes propios', !!sanPabloMoves.EMBESTIDA && !!sanPabloMoves.GOLPE_CODO);
-check('San Pablo conserva el set base', !!sanPabloMoves.ATAQUE_LIGERO);
-check('el golpe propio tiene su frame data', sanPabloMoves.EMBESTIDA.startup === 11 && sanPabloMoves.EMBESTIDA.duration === 36);
-check('Malon tiene el remate', !!MoveTable.getMoves('MALON').RV_FIN);
+const pedroMoves = MoveTable.getMoves('PEDRO');
+check('Pedro tiene golpes propios', !!pedroMoves.EMBESTIDA && !!pedroMoves.GOLPE_CODO);
+check('Pedro conserva el set base', !!pedroMoves.ATAQUE_LIGERO);
+check('el golpe propio tiene su frame data', pedroMoves.EMBESTIDA.startup === 11 && pedroMoves.EMBESTIDA.duration === 36);
+check('el moveset de Pedro es por capas', !!pedroMoves.GANCHO && !!pedroMoves.PATADA_FRONTAL && !!pedroMoves.BARREDO && !!pedroMoves.DERIBO && !!pedroMoves.SUMISION);
+check('el botellazo es su especial', pedroMoves.ATAQUE_ESPECIAL.label === 'Botellazo' && pedroMoves.ATAQUE_ESPECIAL.type === 'AREA');
+check('el directo de Pedro es mas rapido que el base', pedroMoves.ATAQUE_LIGERO.startup === 3);
+check('Juan tiene el remate', !!MoveTable.getMoves('JUAN').RV_FIN);
+check('hasMove distingue lo propio de lo base', MoveTable.hasMove('PEDRO', 'GANCHO') && !MoveTable.hasMove('JUAN', 'GANCHO') && !MoveTable.hasMove('PEDRO', 'NO_EXISTE'));
 
 // ---------------------------------------------------------------------------
 // 5. Maquina: comportamiento de combate

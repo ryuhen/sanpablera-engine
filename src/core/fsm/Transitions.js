@@ -23,6 +23,8 @@
  * ============================================================================
  */
 import SPF from './Constants.js';
+import { hasMove } from './MoveTable.js';
+import { MOVE_STATE_IDS } from './states/Movesets.js';
 
 const {
     State, StateGroup, Phase, Intent, TransitionSource, GrappleRole,
@@ -332,6 +334,77 @@ const RULES = [
         event: 'TIMEOUT', priority: 40,
         to: State.CAIDA_LENTA,
         debug: 'air recovery -> caida lenta'
+    }),
+
+    // =========================================================================
+    // MOVISETS · los golpes propios de cada peleador
+    // -------------------------------------------------------------------------
+    // El vocabulario de intents es el MISMO para todos (ligero,
+    // pesado, tecnica...). Lo que cambia es el CONTENIDO: estas
+    // reglas llevan a los estados propios SOLO cuando el MOVISET
+    // del peleador define el golpe (hasMove). Si no lo define, la
+    // regla no compite y gana el golpe base. Asi cada moveset
+    // amplia el vocabulario sin tocar la maquina ni romper al
+    // resto de peleadores.
+    //
+    // Los golpes y sus estados viven en states/Movesets.js: el
+    // moveset de Pedro Perez es el ejemplo escrito capa por capa
+    // (boxeo -> patadas -> suelo -> botella).
+    // =========================================================================
+    rule({
+        from: FREE, source: TransitionSource.INPUT, event: Intent.ATAQUE_LIGERO,
+        priority: 63,
+        // Adelante + ligero: el gancho (entra hacia el rival).
+        guard: (ctx) => !!ctx.input.forward && !ctx.input.down
+            && hasMove(ctx.fsm.api.characterId, 'GANCHO'),
+        to: () => MOVE_STATE_IDS.SP_GANCHO,
+        debug: 'adelante + ligero -> gancho (moveset)'
+    }),
+    rule({
+        from: FREE, source: TransitionSource.INPUT, event: Intent.ATAQUE_LIGERO,
+        priority: 63,
+        // Atras + ligero: el codazo (castiga al que retrocede).
+        guard: (ctx) => !!ctx.input.back && !ctx.input.down
+            && hasMove(ctx.fsm.api.characterId, 'GOLPE_CODO'),
+        to: () => MOVE_STATE_IDS.SP_CODAZO,
+        debug: 'atras + ligero -> codazo (moveset)'
+    }),
+    rule({
+        from: [StateGroup.GROUNDED_LOCOMOTION], source: TransitionSource.INPUT,
+        event: Intent.ATAQUE_PESADO, priority: 65,
+        // Adelante + pesado: la patada frontal (larga, mantiene la distancia).
+        guard: (ctx) => !!ctx.input.forward && !ctx.input.down
+            && hasMove(ctx.fsm.api.characterId, 'PATADA_FRONTAL'),
+        to: () => MOVE_STATE_IDS.SP_PATADA_FRONTAL,
+        debug: 'adelante + pesado -> patada frontal (moveset)'
+    }),
+    rule({
+        from: [StateGroup.GROUNDED_LOCOMOTION], source: TransitionSource.INPUT,
+        event: Intent.ATAQUE_PESADO, priority: 65,
+        // Abajo + pesado: el barrido propio (bajo, derriba).
+        guard: (ctx) => !!ctx.input.down
+            && hasMove(ctx.fsm.api.characterId, 'BARREDO'),
+        to: () => MOVE_STATE_IDS.SP_BARREDO,
+        debug: 'abajo + pesado -> barrido (moveset)'
+    }),
+    rule({
+        from: State.CUADRUPEDA, source: TransitionSource.INPUT,
+        event: Intent.ATAQUE_PESADO, priority: 66,
+        // Cuadrupeda + pesado: la embestida (la carga: cierra
+        // distancia de un golpe).
+        guard: (ctx) => hasMove(ctx.fsm.api.characterId, 'EMBESTIDA'),
+        to: () => MOVE_STATE_IDS.SP_EMBESTIDA,
+        debug: 'cuadrupeda + pesado -> embestida (moveset)'
+    }),
+    rule({
+        from: FREE, source: TransitionSource.INPUT, event: Intent.TECNICA,
+        priority: 60,
+        // Tecnica: el derribo (la puerta al suelo). Va POR DEBAJO
+        // del agarre (68): si el peleador tiene agarre, el agarre
+        // manda; si no, el derribo es SU tecnica.
+        guard: (ctx) => hasMove(ctx.fsm.api.characterId, 'DERIBO'),
+        to: () => MOVE_STATE_IDS.SP_DERIBO,
+        debug: 'tecnica -> derribo (moveset)'
     }),
 
     // =========================================================================

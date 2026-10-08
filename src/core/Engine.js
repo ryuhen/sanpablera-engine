@@ -4,35 +4,34 @@
  * ----------------------------------------------------------------------------
  * Arranque del juego: motor, escena, fisicas, peleadores e interfaz.
  *
- * QUE HA CAMBIADO RESPECTO AL CUBO DE PRUEBA
+ * QUE HAY AQUI
  * ----------------------------------------------------------------------------
- *   Antes habia un cubo de 1,5 m con fisicas que caia al suelo. Era un
- *   comprobador de que el motor arrancaba, nada mas. Ahora en su lugar se
- *   montan DOS peleadores con el modelo de assets/characters/mannequin.glb, cada
- *   uno con su esqueleto real y su rig numerico (cine/Rig.js).
+ *   El bucle de juego y el CABLEADO del combate:
  *
- *   El cubo no se ha escondido: se ha QUITADO. Dejarlo colgando seria ruido.
+ *     UI tactil -> InputMapper -> FighterEntity -> (FSM + rig) ->
+ *     CharacterModel -> Babylon
+ *
+ *   El InputMapper traduce el d-pad y los 4 botones en input de la
+ *   FSM (y detecta doble toque, secuencias y combos). La FighterEntity
+ *  es la duena del peleador: la maquina de locomocion (paso ->
+ *   caminar -> correr, dashes, cuadripedia, deslizamientos), las
+ *   ventanas de esquive, el puerto `api` de la FSM y la pose de cada
+ *   frame. La FSM decide los estados de combate (golpes, guardias,
+ *   impactos, derribos) y el rig los dibuja.
+ *
+ *   Tambien vive aqui el MUNDO: hitstop, el saco de boxeo (objeto
+ *   interactuable) y la resolucion de hitboxes (tryHit), que es donde
+ *   se aplica la regla de oro del movimiento: los golpes LINEALES se
+ *   esquivan moviendose y los AREA cazan a quien se mueve.
  *
  * ORDEN DE ARRANQUE (importa, y por eso esta en este orden)
  * ----------------------------------------------------------------------------
- *   1. LoadingScreen, ANTES de tocar BABYLON. La pantalla de carga de grafiti
- *      (ui/LoadingScreen.js) pesa fases reales, asi que tiene que existir para
- *      que la primera fase "motor" se pueda marcar.
+ *   1. LoadingScreen, ANTES de tocar BABYLON.
  *   2. Motor y escena.
  *   3. Fisicas.
- *   4. Peleadores: es la fase lenta (lectura del .glb, construccion del rig).
- *   5. Interfaz.
- *   6. El boton de "toca para jugar" pide pantalla completa y suelta el
- *      arranque. Hasta ese gesto no se arranca el bucle: si se arrancara antes,
- *      en un movil se perderian los primeros segundos de juego por culpa de la
- *      pantalla completa.
- *
- * POR QUE LOS PELOADORES NO LLEVAN FISICA
- * ----------------------------------------------------------------------------
- *   Un esqueleto con Cannon por encima se desincroniza en un solo frame. El
- *   suelo y las colisiones los lleva la logica de combate (el spacing viene de
- *   donde estan los pies, no de un rigidbody). Aqui la fisica se queda en el
- *   suelo y en el muro de contencion del ring.
+ *   4. Escenario y utilería (saco de boxeo).
+ *   5. Peleadores (la fase lenta: lectura del .glb, rig).
+ *   6. Interfaz y bucle.
  * ============================================================================
  */
 
@@ -42,9 +41,11 @@ import LoadingScreen from '../ui/LoadingScreen.js';
 import SelectScreen from '../ui/SelectScreen.js';
 import StageSelect from '../ui/StageSelect.js';
 import { loadCharacterModel } from '../render/CharacterModel.js';
-import { stancePose } from './cine/Stances.js';
+import { InputMapper } from './entities/InputMapper.js';
+import FighterEntity, { nextStance } from './entities/FighterEntity.js';
 import { StaminaGauge } from './combat/Stamina.js';
-import { ROSTER } from './roster.js';
+import { Intent } from './fsm/Constants.js';
+import { fullRoster } from './roster.js';
 import { STAGES } from './stages.js';
 
 const MODEL_URL = './assets/characters/mannequin.glb';
@@ -55,6 +56,18 @@ const FIGHTER_CORNERS = [
     { name: 'P1', x: -0.55, z: 0.45, facing: 0 },
     { name: 'P2', x: 0.55, z: -0.45, facing: Math.PI }
 ];
+
+// Dentro del ring: los peleadores no salen de este radio (suelo de 3,1 m).
+const RING_LIMIT = 2.8;
+// Distancia minima al rival: nadie se pisa para "meterse" en el otro.
+const MIN_SPACING = 0.9;
+// Volumen de colision de un peleador (para la hitbox del rival).
+const OPPONENT_HULL = 0.45;
+// Boton multiple: cuanto se mantiene ACCION antes de entrar en modo
+// target (encarado automatico + zoom de camara).
+const TARGET_HOLD = 0.32;
+// Alcance para interactuar con la utilería (el saco).
+const INTERACT_RANGE = 1.25;
 
 // ===========================================================================
 // 1. PANTALLA DE CARGA (antes de nada, para que el progreso sea real)
@@ -91,7 +104,7 @@ if (B.CannonJSPlugin) {
 loading.step('fisicas');
 
 // ===========================================================================
-// 4. ESCENARIO
+// 4. ESCENARIO Y UTILERÍA
 // ===========================================================================
 
 function matte(scene_, hex, spec) {
@@ -142,6 +155,94 @@ camera.lowerRadiusLimit = 2.2;
 camera.upperRadiusLimit = 12;
 camera.wheelDeltaPercentage = 0.02;
 
+/**
+ * Saco de boxeo: pendulo amortiguado colgado de un ancla. Es el
+ * primer OBJETO DEL ESCENARIO: se le golpea (lo balancea el impacto
+ * y destella) y se le toca con el boton multiple (empujon).
+ *
+ * El plano de balanceo apunta al centro del ring, para que un
+ * golpe recto lo aleje del peleador.
+ */
+function makePunchBag(scene_) {
+    const anchor = new B.Vector3(-2.85, 2.42, 0.78);
+    const LEN = 1.3;
+
+    // Direccion del balanceo (hacia el centro del ring).
+    const toCenter = new B.Vector3(-anchor.x, 0, -anchor.z);
+    toCenter.normalize();
+    const dirX = toCenter.x;
+    const dirZ = toCenter.z;
+    // Eje de inclinacion: perpendicular al balanceo (horizontal).
+    const tiltAxis = new B.Vector3(dirZ, 0, -dirX);
+
+    const pivot = new B.TransformNode('bagPivot', scene_);
+    pivot.position = anchor;
+
+    const chain = B.MeshBuilder.CreateCylinder('bagChain', { diameter: 0.02, height: LEN }, scene_);
+    chain.parent = pivot;
+    chain.position = new B.Vector3(0, -LEN / 2, 0);
+    chain.material = matte(scene_, '#8a8f9a', 0.35);
+
+    const bagMat = new B.StandardMaterial('bagMat', scene_);
+    bagMat.diffuseColor = B.Color3.FromHexString('#7a3b3b');
+    bagMat.specularColor = new B.Color3(0.2, 0.2, 0.2);
+    bagMat.emissiveColor = B.Color3.Black();
+    const bag = B.MeshBuilder.CreateCylinder('saco', { diameter: 0.5, height: 0.85, tessellation: 24 }, scene_);
+    bag.parent = pivot;
+    bag.position = new B.Vector3(0, -LEN, 0);
+    bag.material = bagMat;
+
+    return {
+        name: 'saco',
+        type: 'prop',
+        radius: 0.34,
+        theta: 0,     // angulo del pendulo (rad)
+        omega: 0,     // velocidad angular
+        flash: 0,     // destello de impacto (decae)
+
+        /** Fisica del pendulo: theta'' = -(g/L) sen(theta) - c·theta'. */
+        update(dt) {
+            const accel = -(9.81 / LEN) * Math.sin(this.theta) - 0.55 * this.omega;
+            this.omega += accel * dt;
+            this.theta += this.omega * dt;
+            // Tope: no da la vuelta completa (rebot con perdidas).
+            if (this.theta > 1.2) { this.theta = 1.2; this.omega *= -0.3; }
+            if (this.theta < -1.2) { this.theta = -1.2; this.omega *= -0.3; }
+            B.Quaternion.RotationAxisToRef(tiltAxis, this.theta, pivot.rotationQuaternion);
+
+            if (this.flash > 0) {
+                this.flash = Math.max(0, this.flash - dt * 4);
+                const f = this.flash;
+                bagMat.emissiveColor = new B.Color3(0.9 * f, 0.35 * f, 0.1 * f);
+            }
+        },
+
+        // Centro del saco (los getters siguen el pendulo).
+        get x() { return anchor.x + Math.sin(this.theta) * dirX * LEN; },
+        get z() { return anchor.z + Math.sin(this.theta) * dirZ * LEN; },
+        get y() { return anchor.y - Math.cos(this.theta) * LEN; },
+
+        /** Golpe: el saco se empuja segun la orientacion del ataque. */
+        hit(move, attacker) {
+            const fx = Math.sin(attacker.fighter.facing);
+            const fz = Math.cos(attacker.fighter.facing);
+            const align = fx * dirX + fz * dirZ;
+            this.omega += align * (2.2 + move.damage * 0.05);
+            this.flash = 1;
+        },
+
+        /** Interaccion (boton multiple cerca): empujon directo. */
+        interact(entity) {
+            const dx = this.x - entity.fighter.x;
+            const dz = this.z - entity.fighter.z;
+            const d = Math.hypot(dx, dz) || 1;
+            const align = (dx / d) * dirX + (dz / d) * dirZ;
+            this.omega += align * 2.6;
+            this.flash = 0.5;
+        }
+    };
+}
+
 // ===========================================================================
 // 5. PELEADORES  (el cubo vivio aqui)
 // ===========================================================================
@@ -154,7 +255,7 @@ camera.wheelDeltaPercentage = 0.02;
  */
 function makeFighter(slot, side) {
     const corner = FIGHTER_CORNERS[side];
-    const f = {
+    return {
         name: corner.name,
         displayName: slot.name,
         characterId: slot.characterId,
@@ -162,19 +263,13 @@ function makeFighter(slot, side) {
         x: corner.x,
         z: corner.z,
         facing: corner.facing,
-        // Estado de combate del peleador. El HUD lo lee cada frame; el FSM
-        // (core/fsm) lo modificara cuando se ligue el combate logico.
+        // Estado de combate del peleador. El HUD lo lee cada frame; la
+        // FighterEntity lo modifica al ligar el golpe.
         health: 100,
-        // Barra de stamina (core/combat/Stamina.js): se consume al correr y
-        // en parkour, se regenera al parar. El HUD la dibuja bajo su nombre.
-        gauge: new StaminaGauge(),
-        // null = parado (mira al rival). { vx, vz } = corriendo hacia ese
-        // rumbo (mira hacia donde corre, no al rival).
-        running: null,
-        // Cadencia de la interpolacion de poses.
-        fkState: null
+        // Barra de stamina (core/combat/Stamina.js): se consume al
+        // correr, se regenera al parar. El HUD la dibuja bajo su nombre.
+        gauge: new StaminaGauge()
     };
-    return f;
 }
 
 const fighters = [];
@@ -200,23 +295,6 @@ function hexOf([r, g, b]) {
 }
 
 /**
- * Postura inicial de cada peleador.
- *
- * NO es una animacion: es la Pose de una postura de cine (core/cine/Stances.js)
- * con los pies ya clavados en el suelo por IK. Lo que se ve aqui es el
- * resultado de medir el modelo, decidir los dos puntos de apoyo y resolver las
- * dos piernas contra ellos, no un numero de rotaciones escrito a mano.
- */
-function adoptStance(fighter, stanceName) {
-    const model = fighter.model;
-    const { pose, state } = stancePose(model.rig, stanceName || 'IDLE', { forward: 1 });
-    model.applyPose(pose, state);
-    fighter.pose = pose;
-    fighter.fkState = state;
-    fighter.stance = stanceName || 'IDLE';
-}
-
-/**
  * Pinta el escenario con la paleta de la carta elegida (spec: el escenario
  * sale de la pantalla de seleccion estilo libro de origami).
  */
@@ -229,11 +307,194 @@ function applyStageTheme(stage) {
 }
 
 // ===========================================================================
-// 6. INTERFAZ
+// 6. MUNDO, ENTIDADES E INPUT
+// ===========================================================================
+
+/** Entidades de combate (una por peleador con modelo cargado). */
+const entities = [];
+
+/** Traductor de input: UI tactil -> input de la FSM + detecciones. */
+const inputMapper = new InputMapper();
+
+/**
+ * El MUNDO: lo que las entidades y las hitboxes necesitan saber.
+ * `hitstop` congela todo el mundo (menos la camara) unos frames
+ * al conectar un golpe: es la sensacion de impacto del juego.
+ */
+const world = {
+    hitstop: 0,
+    props: [],
+    ringLimit: RING_LIMIT,
+    minSpacing: MIN_SPACING,
+
+    opponentOf(entity) {
+        if (entities.length < 2) return null;
+        const i = entities.indexOf(entity);
+        return entities[(i + 1) % entities.length] || null;
+    },
+
+    /**
+     * Comprueba la hitbox del atacante. El punto de golpe nace
+     * DELANTE del peleador (su frente) y se mide contra el
+     * volumen del rival y contra la utilería.
+     *
+     * Aqui se aplica la regla de oro del movimiento: el
+     * dictamen (defend) de la entidad defensora decide si el
+     * golpe lineal se esquivo o si el de area cazo al que se
+     * movia.
+     */
+    tryHit(attacker) {
+        const fsm = attacker.fsm;
+        const move = fsm.move;
+        if (!move) return 'miss';
+        const fa = attacker.fighter;
+        const hx = fa.x + Math.sin(fa.facing) * move.hitbox.forward;
+        const hz = fa.z + Math.cos(fa.facing) * move.hitbox.forward;
+
+        const opp = this.opponentOf(attacker);
+        if (opp && opp.model) {
+            const d = Math.hypot(opp.fighter.x - hx, opp.fighter.z - hz);
+            if (d <= move.hitbox.radius + OPPONENT_HULL) {
+                const verdict = opp.defend(move, attacker, this);
+                fsm.markHitboxResolved();
+                if (verdict.blocked) {
+                    opp.onBlocked(move, attacker, this);
+                    return 'blocked';
+                }
+                if (verdict.hit) {
+                    opp.takeHit(move, attacker, this, verdict.bonus);
+                    return 'hit';
+                }
+                return 'dodged';
+            }
+        }
+
+        // Objetos del escenario (el saco de boxeo).
+        for (const prop of this.props) {
+            const d = Math.hypot(prop.x - hx, prop.z - hz);
+            if (d <= move.hitbox.radius + prop.radius) {
+                prop.hit(move, attacker);
+                fsm.markHitboxResolved();
+                return 'prop';
+            }
+        }
+        return 'miss';
+    }
+};
+
+// Utilería del ring.
+world.props.push(makePunchBag(scene));
+
+/** Input "congelado" para el rival pasivo: nada pulsado, nada de movimiento. */
+const IDLE_INPUT = Object.freeze({
+    x: 0, y: 0,
+    forward: false, back: false, up: false, down: false,
+    left: false, right: false,
+    pressed: Object.freeze(Object.create(null)),
+    held: Object.freeze(Object.create(null)),
+    moveX: 0, moveZ: 0, moveMag: 0,
+    dash: null, airSeqReady: false,
+    quadEdge: false, slideEdge: false,
+    actionEdge: false, actionHeld: false, actionFresh: false,
+    crouch: false, dirEdge: null
+});
+
+// ===========================================================================
+// 7. INTERFAZ
 // ===========================================================================
 
 let ui = null;
 let hud = null;
+
+/**
+ * Basis de la camara en el suelo: "adelante" es la proyeccion del
+ * rayo de la camara al plano XZ y "derecha" su perpendicular. El
+ * d-pad se traduce con esto: pulsar "arriba" en pantalla aleja al
+ * peleador de la camara, sea cual sea el angulo de esta.
+ */
+function cameraGroundBasis() {
+    const d = camera.getForwardRay().direction;
+    let fx = d.x;
+    let fz = d.z;
+    const len = Math.hypot(fx, fz);
+    if (len < 1e-4) { fx = 0; fz = 1; }
+    else { fx /= len; fz /= len; }
+    // Izquierda del sistema (Babylon es zurdo): right = (fz, 0, -fx).
+    return { fx, fz, rx: fz, rz: -fx };
+}
+
+/**
+ * BOTON MULTIPLE (ACCION). Un boton, varios usos, por
+ * tiempo de pulsacion y contexto:
+ *
+ *   - Toque corto ........ ESPECIAL (el golpe de
+ *     recurso: el botellazo de Pedro, la onda base de
+ *     cualquier otro) o INTERACTUAR con la utileria
+ *     cercana (el saco).
+ *   - Mantenido (>=0,32 s) modo TARGET: encarado automatico
+ *     al rival y zoom de camara.
+ *   - Con puño + diagonal .. combos de movimiento (cuadrupedia y
+ *     deslizamiento): la pulsacion se CONSUME y no dispara
+ *     ni especial ni target.
+ *
+ * El especial se dispara al SOLTAR (como el interactuar):
+ * asi un toque corto sigue siendo un toque aunque el
+ * jugador aguante un instante, y el modo target no tira
+ * el golpe por accidente.
+ */
+const action = { held: false, since: 0, targeting: false, consumed: false };
+
+function nearestProp(entity, range) {
+    let best = null;
+    let bestD = range;
+    for (const prop of world.props) {
+        const d = Math.hypot(prop.x - entity.fighter.x, prop.z - entity.fighter.z);
+        if (d <= bestD) { best = prop; bestD = d; }
+    }
+    return best;
+}
+
+function updateActionButton(input, dt) {
+    const player = entities[0];
+    if (!player) return;
+
+    if (input.actionEdge) {
+        action.held = true;
+        action.since = 0;
+        action.targeting = false;
+        action.consumed = false;
+    }
+    if (action.held) {
+        action.since += dt;
+        // Los combos de movimiento consumen la pulsacion.
+        if (!action.consumed && (input.quadEdge || input.slideEdge)) {
+            action.consumed = true;
+        }
+        // Mantenido: modo target.
+        if (!action.targeting && !action.consumed && action.since >= TARGET_HOLD) {
+            action.targeting = true;
+            player.targetLock = true;
+        }
+    }
+    if (!input.actionHeld && action.held) {
+        if (action.targeting) {
+            player.targetLock = false;
+        } else if (!action.consumed) {
+            const prop = nearestProp(player, INTERACT_RANGE);
+            if (prop) prop.interact(player);
+            else {
+                // Toque corto y sin utileria cerca: EL ESPECIAL.
+                // El intent lo resuelve la tabla de transiciones
+                // (y el frame data del moveset del peleador),
+                // igual que cualquier otro golpe.
+                input.pressed[Intent.ATAQUE_ESPECIAL] = true;
+            }
+        }
+        action.held = false;
+        action.targeting = false;
+        action.consumed = false;
+    }
+}
 
 // ===========================================================================
 // ARRANQUE
@@ -246,8 +507,9 @@ async function boot() {
     loading.finish();
     await loading.whenStarted();
 
-    // --- Seleccion de peleador (8 celdas, tipo panal) ----------------------
-    const selection = await new SelectScreen({ roster: ROSTER }).pick();
+    // --- Seleccion de peleador (8 celdas tipo panal + la del
+    //     jugador, con su nombre guardado en la maquina) ----
+    const selection = await new SelectScreen({ roster: fullRoster() }).pick();
 
     // --- Seleccion de escenario (libro de origami; solo 1 por ahora) -------
     const { stage } = await new StageSelect({ stages: STAGES }).pick();
@@ -268,9 +530,23 @@ async function boot() {
             continue;
         }
         tint(f.model, f.color);
-        adoptStance(f, 'GUARD');
         // Cada peleador en su esquina, mirando al centro.
         f.model.place(f.x, f.z, f.facing);
+    }
+
+    // --- Entidades de combate (FSM + rig + locomocion) ---------------------
+    // P2 es el RIVAL PASIVO: input congelado y postura de guardia. Se
+    // levanta solo del suelo (la entidad inyecta la levantada) pero no
+    // ataca: la IA del rival es un paso posterior.
+    for (const f of fighters) {
+        if (!f.model) continue;
+        entities.push(new FighterEntity({
+            fighter: f,
+            model: f.model,
+            characterId: f.characterId || 'BASE',
+            id: f.name,
+            stance: f.name === 'P2' ? 'GUARD' : 'IDLE'
+        }));
     }
 
     // --- Interfaz ---------------------------------------------------------
@@ -291,114 +567,78 @@ async function boot() {
 }
 
 // ===========================================================================
-// AVANCE DEL MUNDO (por ahora: correr y la camara que no pierde a nadie)
+// BUCLE DE JUEGO
 // ===========================================================================
-
-// Dentro del ring: los peleadores no salen de este radio (suelo de 3,1 m).
-const RING_LIMIT = 2.8;
-// Distancia minima al rival: nadie se pisa para "meterse" en el otro.
-const MIN_SPACING = 0.9;
-
-function opponentOf(f) {
-    return f.name === fighters[0].name ? fighters[1] : fighters[0];
-}
-
-/** Rumbo que mira a la cara/pecho del rival (facing 0 = +Z). */
-function headingToward(f, o) {
-    if (!o) return f.facing;
-    return Math.atan2(o.x - f.x, o.z - f.z);
-}
-
-/**
- * Un paso del mundo por frame. Hoy hace dos cosas:
- *   - Ejecutar la carrera: mueve al peleador, lo GIRA hacia donde corre (no
- *     hacia el rival) y drena la stamina segun la direccion del rumbo.
- *   - Al pararse, gira hacia el rival (le mira la cara/pecho) y regenera.
- * Cuando exista la logica de combate real (FSM), el movimiento y los gastos
- * de stamina los dirigira el input, no el debug.
- */
-function advance(dt) {
-    for (const f of fighters) {
-        const o = opponentOf(f);
-        const run = f.running;
-
-        if (run) {
-            f.gauge.update(dt, {
-                running: true,
-                moveX: run.vx,
-                moveZ: run.vz,
-                toOppX: o.x - f.x,
-                toOppZ: o.z - f.z
-            });
-
-            // Sin stamina no hay carrera: se frena en seco (gira al rival).
-            if (!f.gauge.canRun()) {
-                f.running = null;
-                if (f.model) f.model.place(f.x, f.z, headingToward(f, o));
-                continue;
-            }
-
-            let nx = f.x + run.vx * dt;
-            let nz = f.z + run.vz * dt;
-
-            // Dentro del ring.
-            const radius = Math.hypot(nx, nz);
-            if (radius > RING_LIMIT) {
-                nx *= RING_LIMIT / radius;
-                nz *= RING_LIMIT / radius;
-            }
-            // Sin pisar al rival.
-            const dox = o.x - nx;
-            const doz = o.z - nz;
-            const dist = Math.hypot(dox, doz);
-            if (dist < MIN_SPACING) {
-                nx = o.x - (dox / dist) * MIN_SPACING;
-                nz = o.z - (doz / dist) * MIN_SPACING;
-            }
-
-            f.x = nx;
-            f.z = nz;
-            if (f.model) {
-                // El corredor mira hacia DONDE CORRE (spec: no a la cara del
-                // rival, no al pecho: al rumbo).
-                f.model.place(f.x, f.z, Math.atan2(run.vx, run.vz));
-            }
-        } else {
-            f.gauge.update(dt, { running: false });
-            if (f.model) f.model.place(f.x, f.z, headingToward(f, o));
-        }
-    }
-}
 
 /**
  * Camara que encuadra SIEMPRE a los dos peleadores (spec: se amplia para
  * mostrar a ambos). Apunta al punto medio y ajusta el radio para que quepan,
  * sea cual sea la distancia entre ellos (incluso en medio de una huida).
+ * En modo target el enfoque aprieta.
  */
 function fitCamera(dt) {
-    const alive = fighters.filter(f => f.model);
+    const alive = entities.filter(e => e.model);
     if (alive.length < 2) return;
 
     const [a, b] = alive;
-    const mx = (a.x + b.x) / 2;
-    const mz = (a.z + b.z) / 2;
-    const span = Math.hypot(a.x - b.x, a.z - b.z);
+    const mx = (a.fighter.x + b.fighter.x) / 2;
+    const mz = (a.fighter.z + b.fighter.z) / 2;
+    const span = Math.hypot(a.fighter.x - b.fighter.x, a.fighter.z - b.fighter.z);
 
     camera.setTarget(new B.Vector3(mx, 1.0, mz));
-    const target = Math.max(4.2, span * 0.9 + 3.0);
+    const locked = entities.some(e => e.targetLock);
+    const base = locked ? 3.0 : 4.2;
+    const target = Math.max(base, span * 0.9 + 3.0);
     camera.radius += (target - camera.radius) * (1 - Math.exp(-dt * 3));
 }
 
-// Un frame: avanzar el mundo, encuadrar, dibujar y volcar el combate al HUD.
+/** Un frame de juego. */
 function render() {
-    const dt = engine.getDeltaTime();
-    advance(dt);
+    // OJO: getDeltaTime() devuelve MILISEGUNDOS en Babylon. Tratarlo
+    // como segundos (el bug de siempre) hacia el juego ~16x mas rapido.
+    const dt = Math.min(engine.getDeltaTime() / 1000, 0.1);
+
+    if (!ui || !entities.length) {
+        // Todavia no hay combate: solo camara y dibujo.
+        fitCamera(dt);
+        scene.render();
+        return;
+    }
+
+    // --- Input (una lectura por frame) ----------------------------------
+    const cam = cameraGroundBasis();
+    const player = entities[0];
+    const opp = world.opponentOf(player);
+    let toOpp = null;
+    if (opp) {
+        const dx = opp.fighter.x - player.fighter.x;
+        const dz = opp.fighter.z - player.fighter.z;
+        const d = Math.hypot(dx, dz) || 1;
+        toOpp = { x: dx / d, z: dz / d };
+    }
+    const input = inputMapper.snapshot(ui.touchControls, cam, toOpp);
+    inputMapper.tick(dt);
+
+    // --- Boton multiple ---------------------------------------------------
+    updateActionButton(input, dt);
+
+    // --- Avance del mundo (congelado por el hitstop) -------------------
+    if (world.hitstop > 0) {
+        world.hitstop = Math.max(0, world.hitstop - dt);
+    } else {
+        // P1 recibe el input real; el rival pasivo, input vacio.
+        for (let i = 0; i < entities.length; i++) {
+            entities[i].update(dt, i === 0 ? input : IDLE_INPUT, world);
+        }
+        for (const prop of world.props) prop.update(dt);
+    }
+
     fitCamera(dt);
     scene.render();
 
     if (hud) {
-        for (const f of fighters) {
-            hud.update(f.name, { health: f.health, stamina: f.gauge.value });
+        for (const e of entities) {
+            hud.update(e.fighter.name, { health: e.fighter.health, stamina: e.fighter.gauge.value });
         }
         hud.tick(dt);
     }
@@ -413,10 +653,10 @@ if (document.readyState === 'loading') {
 }
 
 // Para depurar desde la consola del navegador.
-window.SANPABLERA = { engine, scene, camera, fighters, loading, ground, hud };
+window.SANPABLERA = { engine, scene, camera, fighters, entities, world, inputMapper, loading, ground, hud };
 
-// Helpers de debug: probar barras, carrera y stamina en tiempo real sin
-// esperar a tener input y combate logico ligados.
+// Helpers de debug: probar barras y golpes en tiempo real sin esperar
+// al input tactil.
 window.SANPABLERA.setHealth = function (name, value) {
     const f = fighters.find(x => x.name === name);
     if (!f) return;
@@ -429,31 +669,32 @@ window.SANPABLERA.setStamina = function (name, value) {
     f.gauge.reset(value);
 };
 
-// Corre hacia el rumbo (dx,dz) a `speed` m/s. Mientras corre mira hacia
-// donde va y quema stamina. Con (dx,dz)=(0,0) simplemente se detiene.
-window.SANPABLERA.run = function (name, dx, dz, speed = 3.5) {
-    const f = fighters.find(x => x.name === name);
-    if (!f) return;
-    const len = Math.hypot(dx, dz);
-    if (len < 1e-4) {
-        f.running = null;
-        return;
-    }
-    f.running = { vx: (dx / len) * speed, vz: (dz / len) * speed };
+/**
+ * Dispara un golpe "a mano" contra el rival (debug / IA):
+ *   SANPABLERA.punch('P1')                 -> puño (ligero)
+ *   SANPABLERA.punch('P1', 'ATAQUE_PESADO')-> patada (pesado)
+ * El intent lo resuelve la tabla de transiciones, como con el mando.
+ */
+window.SANPABLERA.punch = function (name, moveKey) {
+    const e = entities.find(x => x.fighter.name === name);
+    if (!e) return false;
+    const intent = moveKey === 'ATAQUE_PESADO' ? Intent.ATAQUE_PESADO : Intent.ATAQUE_LIGERO;
+    e.tryIntent(intent);
+    return true;
 };
 
-window.SANPABLERA.stop = function (name) {
-    const f = fighters.find(x => x.name === name);
-    if (!f) return;
-    f.running = null;
+/** Cicla la postura del peleador (el abanico del boton multiple). */
+window.SANPABLERA.stance = function (name) {
+    const e = entities.find(x => x.fighter.name === name);
+    if (!e) return;
+    e.style = nextStance(e.style);
 };
 
-// Intenta una maniobra de parkour (REBOTE / DESLIZAR). Devuelve true si se
-// pago con stamina y false si no quedaba.
-window.SANPABLERA.parkour = function (name, kind) {
-    const f = fighters.find(x => x.name === name);
-    if (!f) return false;
-    const ok = f.gauge.spendParkour(kind);
-    if (!ok) console.warn('stamina insuficiente para ' + kind + ' (' + f.gauge.value.toFixed(1) + ' pts)');
-    return ok;
+/** Activa / desactiva el candado de target de un peleador. */
+window.SANPABLERA.target = function (name, on) {
+    const e = entities.find(x => x.fighter.name === name);
+    if (!e) return;
+    e.targetLock = !!on;
 };
+
+export default { boot, render, entities, world };

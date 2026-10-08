@@ -11,11 +11,17 @@
  *   teclado: flechas para moverse por el panal, Enter para marcar y volver a
  *   pulsar Enter para confirmar el combate.
  *
+ *   La ultima celda es EL PELEADOR DEL JUGADOR (ver core/CustomFighter.js):
+ *   con ella enfocada, R la RENOMBRA (el nombre se guarda en la memoria
+ *   local de la maquina). Al enfocar cualquier celda se muestra su
+ *   historia y su estilo de pelea.
+ *
  *   Se usa como promesa: const { p1, p2 } = await new SelectScreen({...}).pick();
  * ============================================================================
  */
 
-import { ROSTER } from '../core/roster.js';
+import { ROSTER, fullRoster } from '../core/roster.js';
+import { renameCustomFighter } from '../core/CustomFighter.js';
 
 const COLS = 4;
 
@@ -38,6 +44,10 @@ const SELECT_CSS = `\
 .spf-select-hex.pick2{filter:drop-shadow(0 0 10px #ff5a4e)}\
 .spf-select-hex.pick2::before{box-shadow:inset 0 0 0 2px #ff5a4e}\
 .spf-select-hint{font-size:clamp(11px,2.3vh,14px);letter-spacing:1px;color:#c7cbe0;min-height:1.4em;text-align:center}\
+.spf-select-info{font-size:clamp(9px,1.8vh,12px);color:#9aa1bd;letter-spacing:.4px;text-align:center;max-width:min(760px,94vw);min-height:2.8em;line-height:1.55}\
+.spf-select-info b{color:#f0f0f6}\
+.spf-select-info i{color:#7d84a3}\
+.spf-select-info u{color:#bf8cf2;text-decoration:none}\
 .spf-select-start{font-size:clamp(13px,3vh,17px);letter-spacing:4px;font-weight:800;color:#10131a;background:linear-gradient(180deg,#f2de8c,#d9b84a);border:none;border-radius:6px;padding:.7em 2.2em;cursor:pointer;font-family:inherit;box-shadow:0 4px 0 #8f7a2a;transform:translateY(0);opacity:0;pointer-events:none}\
 .spf-select-start.ready{opacity:1;pointer-events:auto}\
 .spf-select-start:active{transform:translateY(2px);box-shadow:0 2px 0 #8f7a2a}`;
@@ -57,7 +67,7 @@ class SelectScreen {
      * @param {object} [opts] { roster } (por defecto ROSTER)
      */
     constructor(opts = {}) {
-        this.roster = opts.roster || ROSTER;
+        this.roster = opts.roster || fullRoster();
         this.pick1 = null;
         this.pick2 = null;
         this.turn = 0;          // 0 = P1, 1 = P2
@@ -81,7 +91,7 @@ class SelectScreen {
         root.className = 'spf-select';
         root.innerHTML = `
             <div class="spf-select-title">ELIGE TU COMBATIENTE</div>
-            <div class="spf-select-subtitle">los ocho del dojo</div>
+            <div class="spf-select-subtitle">los ocho del dojo + tú</div>
         `;
         const grid = document.createElement('div');
         grid.className = 'spf-select-grid';
@@ -108,6 +118,10 @@ class SelectScreen {
             cell.appendChild(name);
             cell.appendChild(tag);
             cell.addEventListener('click', () => this.pickSlot(i));
+            cell.addEventListener('mouseenter', () => {
+                this.index = i;
+                this.showInfo(i);
+            });
             grid.appendChild(cell);
             this.tiles.push(hex);
             this.cells.push(cell);
@@ -118,6 +132,13 @@ class SelectScreen {
         hint.id = 'spf-select-hint';
         this.hint = hint;
 
+        // Historia y estilo del peleador enfocado: la
+        // personalidad de cada uno, en una linea.
+        const info = document.createElement('div');
+        info.className = 'spf-select-info';
+        info.id = 'spf-select-info';
+        this.info = info;
+
         const start = document.createElement('button');
         start.className = 'spf-select-start';
         start.textContent = 'COMBATE';
@@ -126,14 +147,52 @@ class SelectScreen {
 
         root.appendChild(grid);
         root.appendChild(hint);
+        root.appendChild(info);
         root.appendChild(start);
         document.body.appendChild(root);
         this.root = root;
 
         this.cells[0].focus();
         this.refresh();
+        this.showInfo(0);
         this._onKey = (e) => this.onKey(e);
         document.addEventListener('keydown', this._onKey);
+    }
+
+    /**
+     * Panel de historia: nombre, etiqueta, estilo y la
+     * historia del peleador enfocado. La celda del jugador
+     * ademas avisa que se puede renombrar (R).
+     */
+    showInfo(index) {
+        if (!this.info) return;
+        const fighter = this.roster[index];
+        if (!fighter) { this.info.textContent = ''; return; }
+        const rename = fighter.custom
+            ? ' · <u>[R] renombrar</u>'
+            : '';
+        this.info.innerHTML =
+            `<b>${fighter.name}</b> — ${fighter.tag}${rename}<br>` +
+            `<i>${fighter.style || ''}</i><br>` +
+            `${fighter.story || ''}`;
+    }
+
+    /** Renombra el peleador del jugador (R con su celda enfocada). */
+    renameFocused() {
+        const fighter = this.roster[this.index];
+        if (!fighter || !fighter.custom) return;
+        const name = window.prompt(
+            'Nombre de tu peleador (máx. 24 letras):', fighter.name
+        );
+        if (name === null) return;          // canceló
+        const renamed = renameCustomFighter(name);
+        if (!renamed) return;
+        fighter.name = renamed.name;
+        const cell = this.cells[this.index];
+        const nameEl = cell && cell.querySelector('.spf-select-name');
+        if (nameEl) nameEl.textContent = renamed.name;
+        this.showInfo(this.index);
+        this.refresh();
     }
 
     pickSlot(index) {
@@ -182,6 +241,15 @@ class SelectScreen {
             if (e.key === 'ArrowDown') nrow = Math.min(rows - 1, row + 1);
             this.index = nrow * COLS + ncol;
             this.cells[this.index]?.focus();
+            this.showInfo(this.index);
+            return;
+        }
+        // R (o r) con la celda del jugador enfocada:
+        // RENOMBRAR el peleador personalizado.
+        if ((e.key === 'r' || e.key === 'R')
+            && this.roster[this.index] && this.roster[this.index].custom) {
+            e.preventDefault();
+            this.renameFocused();
             return;
         }
         if (e.key === 'Enter') {

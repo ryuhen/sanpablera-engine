@@ -75,6 +75,9 @@ class UI {
       }
 
       // Add event listeners
+      // Touch (movil) y pointer (raton/estilo). Son
+      // idempotentes: si un dispositivo dispara ambos,
+      // el estado final es el mismo.
       button.addEventListener('touchstart', (e) => {
         e.preventDefault();
         this.touchControls.updateDpad(direction, true);
@@ -85,6 +88,33 @@ class UI {
         e.preventDefault();
         this.touchControls.updateDpad(direction, false);
         button.style.backgroundColor = '#ccc';
+      });
+
+      button.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        this.touchControls.updateDpad(direction, true);
+        button.style.backgroundColor = '#999';
+      });
+
+      button.addEventListener('pointerup', (e) => {
+        e.preventDefault();
+        this.touchControls.updateDpad(direction, false);
+        button.style.backgroundColor = '#ccc';
+      });
+
+      button.addEventListener('pointercancel', (e) => {
+        e.preventDefault();
+        this.touchControls.updateDpad(direction, false);
+        button.style.backgroundColor = '#ccc';
+      });
+
+      button.addEventListener('pointerleave', (e) => {
+        // En raton: salir del boton con el boton pulsado
+        // SUELTA (el dedo en movil ya lo hace con pointerup).
+        if (e.pointerType === 'mouse' && e.buttons > 0) {
+          this.touchControls.updateDpad(direction, false);
+          button.style.backgroundColor = '#ccc';
+        }
       });
 
       dpadContainer.appendChild(button);
@@ -122,6 +152,7 @@ class UI {
       button.style.border = 'none';
       button.style.opacity = '0.7';
       button.style.cursor = 'pointer';
+      button.style.touchAction = 'none';
 
       // Position buttons
       switch (buttonInfo.id) {
@@ -144,6 +175,7 @@ class UI {
       }
 
       // Add event listeners
+      // Touch (movil) y pointer (raton/estilo). Idempotentes.
       button.addEventListener('touchstart', (e) => {
         e.preventDefault();
         this.touchControls.updateButton(buttonInfo.id, true);
@@ -154,6 +186,31 @@ class UI {
         e.preventDefault();
         this.touchControls.updateButton(buttonInfo.id, false);
         button.style.backgroundColor = '#ccc';
+      });
+
+      button.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        this.touchControls.updateButton(buttonInfo.id, true);
+        button.style.backgroundColor = '#999';
+      });
+
+      button.addEventListener('pointerup', (e) => {
+        e.preventDefault();
+        this.touchControls.updateButton(buttonInfo.id, false);
+        button.style.backgroundColor = '#ccc';
+      });
+
+      button.addEventListener('pointercancel', (e) => {
+        e.preventDefault();
+        this.touchControls.updateButton(buttonInfo.id, false);
+        button.style.backgroundColor = '#ccc';
+      });
+
+      button.addEventListener('pointerleave', (e) => {
+        if (e.pointerType === 'mouse' && e.buttons > 0) {
+          this.touchControls.updateButton(buttonInfo.id, false);
+          button.style.backgroundColor = '#ccc';
+        }
       });
 
       actionButtonsContainer.appendChild(button);

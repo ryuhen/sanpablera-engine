@@ -39,6 +39,16 @@ function defineMove(key, def) {
         hitstun: def.hitstun,
         blockstun: def.blockstun,
         hitLevel: def.hitLevel || HitLevel.MEDIO,
+        // --- Clasificacion del golpe (spec: movimiento estilo Soulcalibur) ---
+        // LINEAL: va en linea recta y QUIEN SE MUEVE (paso, dash) lo
+        //         esquiva. Es el golpe "castigado" por la movilidad.
+        // AREA:   barre un arco o zona y CAZA a quien se esta moviendo:
+        //         conecta con aturdimiento (stun) o derribo. Es el castigo
+        //         a la movilidad.
+        type: def.type || 'LINEAL',
+        // Altura del golpe: ALTO (lo esquiva el dash agachado), MEDIO,
+        // BAJO y SUELO (los dos ultimos los esquiva el dash saltando).
+        height: def.height || 'MEDIO',
         // Altura de guardia que BLOQUEA este golpe. Si el_guardaje del rival es
         // mas bajo, el golpe pasa: es lo que hace que agacharse no baste contra
         // un overhead sin anadir un ataque mas.
@@ -88,6 +98,7 @@ const CORE_MOVES = {
         startup: 4, active: 3, recovery: 7,
         damage: 6, hitstun: 12, blockstun: 8,
         hitLevel: HitLevel.MEDIO, breaksGuardHeight: GuardHeight.MEDIA,
+        type: 'LINEAL', height: 'MEDIO',   // directo: lo esquiva el paso
         cancelTier: CancelTier.LIGHT, meterGain: 8, meterCost: 0,
         hitstop: 5, radius: 0.5, forward: 0.5, centerY: 1.15,
         clip: 'atk_light'
@@ -98,6 +109,7 @@ const CORE_MOVES = {
         startup: 9, active: 4, recovery: 18,
         damage: 14, hitstun: 20, blockstun: 12,
         hitLevel: HitLevel.FUERTE, breaksGuardHeight: GuardHeight.ALTA,
+        type: 'AREA', height: 'MEDIO',     // barre arco: caza al que se mueve
         knockdown: 'LIGHT', launchX: 3.2, launchY: 2.6, juggleAdd: 1,
         cancelTier: CancelTier.HEAVY, meterGain: 12, meterCost: 0,
         hitstop: 10, radius: 0.72, forward: 0.7, centerY: 1.05,
@@ -110,6 +122,7 @@ const CORE_MOVES = {
         startup: 11, active: 6, recovery: 26,
         damage: 22, hitstun: 26, blockstun: 14,
         hitLevel: HitLevel.FUERTE, breaksGuardHeight: GuardHeight.ALTA,
+        type: 'AREA', height: 'MEDIO',     // onda: caza al que se mueve
         knockdown: 'ALWAYS', launchX: 6.5, launchY: 4.2, juggleAdd: 2,
         cancelTier: CancelTier.SPECIAL, meterCost: 25, meterGain: 0,
         hitstop: 14, freeze: 48, radius: 0.85, forward: 0.9, centerY: 1.1,
@@ -124,6 +137,7 @@ const CORE_MOVES = {
         startup: 5, active: 6, recovery: 8,
         damage: 9, hitstun: 16, blockstun: 9,
         hitLevel: HitLevel.MEDIO, breaksGuardHeight: GuardHeight.MEDIA,
+        type: 'LINEAL', height: 'MEDIO',   // directo en el aire
         launchX: 1.4, launchY: 2.2, juggleAdd: 1,
         cancelTier: CancelTier.LIGHT, meterGain: 10, meterCost: 0,
         hitstop: 6, radius: 0.55, forward: 0.5, centerY: 0.2,
@@ -135,6 +149,7 @@ const CORE_MOVES = {
         startup: 5, active: 3, recovery: 9,
         damage: 5, hitstun: 11, blockstun: 8,
         hitLevel: HitLevel.BAJO, breaksGuardHeight: GuardHeight.BAJA,
+        type: 'LINEAL', height: 'BAJO',    // corto y bajo: lo salta el dash
         cancelTier: CancelTier.LIGHT, meterGain: 6, meterCost: 0,
         hitstop: 4, radius: 0.5, forward: 0.45, centerY: 0.42,
         clip: 'atk_crouch'
@@ -147,6 +162,7 @@ const CORE_MOVES = {
         startup: 8, active: 4, recovery: 22,
         damage: 8, hitstun: 0, blockstun: 10,
         hitLevel: HitLevel.BAJO, breaksGuardHeight: GuardHeight.BAJA,
+        type: 'LINEAL', height: 'BAJO',    // rasante: lo salta el dash
         knockdown: 'ALWAYS', launchX: 1.1, launchY: 0,
         cancelTier: CancelTier.HEAVY, meterGain: 10, meterCost: 0,
         hitstop: 8, radius: 0.8, forward: 0.75, centerY: 0.22,
@@ -161,6 +177,7 @@ const CORE_MOVES = {
         startup: 6, active: 5, recovery: 20,
         damage: 18, hitstun: 30, blockstun: 10,
         hitLevel: HitLevel.FUERTE, breaksGuardHeight: GuardHeight.ALTA,
+        type: 'AREA', height: 'MEDIO',     // cierra el espacio: caza
         knockdown: 'ALWAYS', launchX: 5.0, launchY: 5.0, juggleAdd: 3,
         cancelTier: CancelTier.TECHNIQUE, meterCost: 0, meterGain: 0,
         hitstop: 16, freeze: 30, radius: 0.8, forward: 0.85, centerY: 1.0,
@@ -170,12 +187,12 @@ const CORE_MOVES = {
 
 /**
  * Registro de golpes por personaje. `base` es el set comun; cada personaje
- * registra encima su set propio y el que share keys con el base lo SUSTITUYE
+ * registra encima su set propio y el que comparte keys con el base lo SUSTITUYE
  * (override) o lo usa si no existe (add).
  *
- *   registerMoves('SAN_PABLO', {
- *     ATAQUE_ESPECIAL: { ...def, label: 'Embestida' }   // override
- *     EMBESTIDA: defineMove('EMBESTIDA', { ... })       // add
+ *   registerMoves('PEDRO', {
+ *     ATAQUE_ESPECIAL: { ...def, label: 'Botellazo' }   // override
+ *     GANCHO: defineMove('GANCHO', { ... })             // add
  *   });
  */
 const characterMoves = new Map();
@@ -198,6 +215,17 @@ function getMoves(characterId) {
     });
 }
 
+/**
+ * ¿El personaje define EL PROPIO golpe (no el base)? Es la
+ * pregunta que hacen las reglas de alcance: un moveset amplia
+ * el vocabulario solo con lo que define; lo que no define lo
+ * resuelve el set base.
+ */
+function hasMove(characterId, key) {
+    const set = characterMoves.get(characterId);
+    return !!(set && set[key]);
+}
+
 function getMove(characterId, key) {
     const set = characterMoves.get(characterId);
     return (set && set[key]) || CORE_MOVES[key] || null;
@@ -208,7 +236,8 @@ export {
     defineMove,
     registerMoves,
     getMoves,
-    getMove
+    getMove,
+    hasMove
 };
 
 export default {
@@ -216,5 +245,6 @@ export default {
     defineMove,
     registerMoves,
     getMoves,
-    getMove
+    getMove,
+    hasMove
 };

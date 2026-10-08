@@ -6,6 +6,7 @@ Esta bitácora nos permite registrar y sincronizar las actividades realizadas en
 
 | Fecha | Autor | Commit | Actividad | Notas |
 |---|---|---|---|---|
+| 2026-10-07 | Sistema | *este commit* | Biblia de diseño, moveset por capas y el peleador del jugador | `Specs.txt` ahora ES la biblia de diseño (las 8 secciones de jugabilidad + caracteristicas tecnicas: peleador personalizado en `localStorage`, la nube por **subapase** en sistema de membresia y el MMORPG **"Isla Caribe"**). Roster renombrado a nombres comunes y memorables (Pedro Pérez, Juan García, José López, María González, John Doe, Jane Doe, Carlos Ruiz, Ana Torres) con historia y estilo de pelea por peleador. Moveset de Pedro escrito capa por capa en `fsm/states/Movesets.js` (**boxeo → patadas → suelo → botella**): `hasMove` en la tabla de transiciones hace que un moveset amplie el vocabulario sin tocar la FSM ni romper al resto. Peleador del jugador (`CustomFighter.js`): novena celda, renombrable con **R**, guardado local, hereda el moveset de un peleador del juego. Input: acorde ligero+pesado = TECNICA (derribo), toque del boton ACCION = ESPECIAL, eventos pointer en la UI tactil (probable con raton). **450 ok, 0 fallos** |
 | 2025-10-04 | Sistema | `a6c6aa1` | Revisión inicial del proyecto | Se analizaron archivos HTML, JS y estructura del proyecto |
 | 2026-10-04 | Sistema | `d96057b` | Recuperación de trabajo perdido | La FSM solo existía en el árbol local sin commitear: recuperación de 5.351 líneas. Se corrigió la ruta de `aiAssistant.js` en `index.html` (`./src/tools/aiAssistant.js`) y se añadieron los scripts `start` y `test` a `package.json` |
 | 2026-10-04 | Sistema | `afd2d06` | Integración de la rama de respaldo | Merge de `backup/github-babylon-2026-10-04`. Se conservaron sus stubs (`index.ts`, `Src/index.ts`) y se descartaron las copias vendorizadas de Babylon (idénticas a `node_modules/babylonjs/`). **Advertencia:** esos stubs importaban `core/Legacy/legacy`, que no existe |
@@ -62,7 +63,35 @@ pendiente la confirmación visual en el navegador.
 - [x] Cámara que encuadra siempre a ambos peleadores (`Engine.js`, `fitCamera`)
 - [x] UI táctil (spec sección 1): `TouchControls.js` + botones DOM en `UI.js` (pad de 8 direcciones y 4 acciones con eventos touch)
 - [x] Borrar los stubs rotos `index.ts` y `Src/index.ts` (importaban `core/Legacy/legacy`)
-- [x] `npm test` en verde: **446 comprobaciones, 0 fallos** (FSM 64 · Cine 333 · HUD 23 · Stamina 26)
+- [x] `Specs.txt` interpretado: ahora es la biblia de diseño completa (secciones 1-8) + caracteristicas tecnicas (sección 9) + arquitectura (sección 10)
+- [x] Moveset de Pedro Pérez por capas (`fsm/states/Movesets.js`) + reglas de alcance por `hasMove` (`Transitions.js`)
+- [x] Roster con nombres comunes memorables, historia y estilo por peleador (`core/roster.js`)
+- [x] Peleador del jugador: localStorage, renombrable (R en la selección), hereda movesets (`core/CustomFighter.js`, `ui/SelectScreen.js`)
+- [x] Eventos pointer en la UI táctil (`ui/UI.js`): el pad y los botones responden al ratón/estilo además del dedo
+- [x] `npm test` en verde: **450 comprobaciones, 0 fallos** (FSM 68 · Cine 333 · HUD 23 · Stamina 26)
+
+### Verificación: la biblia (Specs.txt) contra el motor
+
+Lo que exige la biblia de diseño y dónde está hoy:
+
+| Biblia | Estado | Dónde vive |
+|---|---|---|
+| 1. Motor ES6 + Babylon web | ✅ hecho | `package.json`, `index.html` |
+| 2. Pad de 8 vías + 4 botones | ✅ hecho | `ui/TouchControls.js` + `ui/UI.js` (touch y pointer) |
+| 3. Cámara dinámica (P1 / punto medio) | ✅ hecho | `Engine.js` `fitCamera` (zoom en modo target) |
+| 4. HUD (vida + recurso + timer) | ✅ hecho | `ui/HUD.js` |
+| 5. Paso → caminar → correr; dash, dash agachado (esquiva altos), dash aéreo (esquiva bajos) | ✅ hecho | `entities/FighterEntity.js`: máquina de locomoción + ventanas de esquive |
+| 6. LINEAL esquivable / AREA caza al que se mueve (stun o derribo) | ✅ hecho | `FighterEntity.defend()` + `Engine.js` `world.tryHit` |
+| 7. Moveset por movimiento (jab, gancho, upper, plexo...) | 🟡 parcial | Moveset por capas de Pedro (`Movesets.js`) y mods de pose por locomoción (`FighterRig.ATTACK_LOCO_MODS`); **falta** un moveset DISTINTO por estado de movimiento (caminando / corriendo / dash) |
+| 7. Ataques aéreos (↑↑ + dir + puño/patada) | ✅ hecho | `InputMapper` (secuencia doble-arriba) + `FighterEntity._airAttack` |
+| 7. Cuadrúpedos y deslizamientos (acción + dir + puño) | ✅ hecho | `InputMapper` (combos) + `FighterEntity._combos` |
+| 7. Variantes frente / espaldas a cámara | ✅ hecho (datos) | `MoveTable` (clips por `VisualFacing`) |
+| 8. FSM: bases, suelo, orientaciones, stances, juggle, hit levels | ✅ hecho | `fsm/` (68 comprobaciones) |
+| 8. Tortuga / dominante (suelo interactivo) | 🟡 parcial | Estados y sesión de agarre existen (`GrappleSession`, `GrappleStates`); **falta el cableado entre los DOS peleadores** (`canGrapple: () => false` en `FighterEntity`) |
+| 8. Aproximación de suelo (correr al caído, ground slides) | 🟡 parcial | El deslizamiento existe; falta el castigo al caído (`isDownAttack` está declarado en `false`) |
+| 9.1 Peleador personalizado (localStorage, renombrable) | ✅ hecho | `core/CustomFighter.js`, `ui/SelectScreen.js` |
+| 9.2 Nube por subapase (membresía) | ⏳ futuro | Documentado en Specs 9.2 |
+| 9.3 MMORPG "Isla Caribe" | ⏳ futuro | Documentado en Specs 9.3 |
 
 ### Pendiente (siguiente sesión)
 
@@ -83,9 +112,16 @@ pendiente la confirmación visual en el navegador.
 - [ ] **Timeline de clips y transiciones** (`TransitionKind`).
 - [ ] **Migrar la IA de `Legacy`** a los módulos actuales (el HUD ya está
       migrado; `aiAssistant.js` carga sin errores).
-- [ ] `Specs.txt` se ha guardado en el repo sin interpretar: sus 6 secciones
-      (controles, cámara, HUD, FSM, hit levels, stances) son el trabajo grande
-      que queda.
+- [ ] **Cableado del agarre entre los dos peleadores** (la sesión ya
+      existe; falta que el rival entre en el estado espejo y que los
+      pedidos del UKE lleguen a la sesión del TORI). Es la puerta a la
+      sumisión de Pedro y al suelo interactivo (biblia 8).
+- [ ] **Moveset distinto por estado de locomoción** (biblia 7): hoy la
+      pose cambia al caminar/correr/dash (`ATTACK_LOCO_MODS`) pero el
+      frame data es el mismo; la siguiente capa es frame data propio
+      por movimiento.
+- [ ] **Castigo en el suelo** (biblia 8): ataques contra el rival
+      caído (`isDownAttack`) y ground slides ofensivos.
 
 ### Bloqueos
 

@@ -1,40 +1,105 @@
-# SANPABLERA ENGINE - ESPECIFICACIONES DE JUGABILIDAD Y ARQUITECTURA
+# SANPABLERA ENGINE — BIBLIA DE DISEÑO, ARQUITECTURA Y JUGABILIDAD (MAESTRO)
 
-## 1. Sistema de Controles Táctiles (UI de Botones)
-- **Distribución:** Layout limpio en los márgenes de la pantalla que **evita que los elementos se encimen o se monten unos sobre otros**.
-- **Pad Direccional:** 8 direcciones completas (Arriba, Abajo, Izquierda, Derecha y las 4 diagonales).
-- **Botones de Acción (4 independientes):**
-  1. Ataque 1 (Ligero / Rápido).
-  2. Ataque 2 (Fuerte / Pesado).
-  3. Guardia / Bloqueo.
-  4. Botón de Acción / Interacción especial.
+Documento maestro del proyecto. Define QUÉ es el juego y CÓMO debe
+sentirse; el código se juzga contra esto.
 
-## 2. Sistema de Cámara Dinámica
+---
+
+## 1. Visión General del Motor y Entorno
+- **Nombre:** Sanpablera Engine
+- **Stack Tecnológico:** JavaScript nativo (módulos ES6), Babylon.js (v9+), desarrollado y optimizado para entornos web móviles y de escritorio (Acode / VS Code).
+- **Género:** Juego de lucha 3D arcade con mecánicas avanzadas de posicionamiento, 8 direcciones de movimiento, físicas de suelo (Grappling / Ground & Pound) y transiciones fluidas estilo *Soulcalibur* y *Bloody Roar*.
+
+---
+
+## 2. Sistema de Controles Táctiles (UI de Botones)
+- **Distribución de Interfaz:** Layout estricto en los márgenes de la pantalla que **evita que los elementos se encimen o se monten unos sobre otros**.
+- **Componentes Táctiles:**
+  * **Pad Direccional (8 Vías):** Arriba, Abajo, Izquierda, Derecha y sus 4 diagonales.
+  * **Botones de Acción (4 independientes):**
+    1. Ataque 1 (Ligero / Rápido).
+    2. Ataque 2 (Fuerte / Pesado).
+    3. Guardia / Bloqueo.
+    4. Botón de Acción / Interacción especial.
+
+---
+
+## 3. Sistema de Cámara Dinámica
 - **Comportamiento:** Sigue la acción de manera fluida en el espacio 3D de Babylon.js.
 - **Puntos de Enfoque Inteligentes:**
-  * Apunta dinámicamente al **Fighter 1** durante momentos de enfoque individual.
-  * Se desplaza automáticamente hacia el **punto medio exacto** entre el Fighter 1 y el Fighter 2 para mantener a ambos dentro del encuadre y de la distancia de combate.
+  * Apunta dinámicamente al **Fighter 1** durante momentos de enfoque individual o cercano.
+  * Se desplaza automáticamente hacia el **punto medio exacto** entre el Fighter 1 y el Fighter 2 para garantizar que ambos combatientes permanezcan siempre dentro del encuadre y la distancia de combate.
 
-## 3. HUD (Interfaz de Usuario de Combate)
-- **Elementos Visibles en Pantalla:**
-  * Barras de vida dinámicas y en tiempo real para cada luchador.
-  * Indicadores de recursos, energía o barras especiales de combate.
+---
 
-## 4. Máquina de Estados Finitos (FSM) Avanzada
-La FSM gestiona de forma estricta los siguientes estados y categorías de combate:
-- **Posiciones Base (4):** Aire, De pie (Normal), Agachado y Pecho tierra.
-- **Estados de Suelo (2):** Caído sobre la espalda y Caído sobre el pecho.
-- **Orientación respecto al Oponente:** 
-  * Con la cabeza hacia el oponente.
-  * Con los pies hacia el oponente.
-  * En un ángulo intermedio.
-- **Stances y Movilidad Especial:** 
-  * De rodillas.
-  * Cuadrúpeda.
-  * Tropezando o cayendo lentamente.
-- **Estados Aéreos y Juggle:** 
-  * Juggle aéreo.
-  * Lanzado fuertemente hacia atrás o hacia el aire.
-- **Niveles de Impacto (Hit Levels):** Bajo, Medio y Fuerte.
-- **Stances Propias del Peleador:** Posturas personalizadas por personaje que definen ataques y animaciones únicas.
-- **Variantes de Orientación Visual:** Las acciones de posición normal, agachado y salto cuentan con versiones explícitas diferenciadas según si el peleador da la **espalda a la cámara** o tiene el **frente hacia la cámara**.
+## 4. HUD (Interfaz de Usuario de Combate)
+- Elementos flotantes o fijos en pantalla que muestran en tiempo real las **barras de vida** e indicadores de energía o recursos especiales de cada luchador.
+
+---
+
+## 5. Sistema de Movimiento Dinámico y Transiciones (8 Direcciones - Estilo Soulcalibur)
+- **Fase Inicial (Paso / Step):** Todo movimiento en las 8 direcciones inicia con una animación de paso de corta duración (pocos frames). Actúa instantáneamente como **esquive** si se ejecuta ante un ataque rival entrante.
+- **Transiciones Progresivas:** Mantener la dirección evoluciona el movimiento a **caminar** (Walk) y, un segundo después, a **correr** (Run).
+- **Dash y Movilidad Avanzada:**
+  * **Dash Normal:** Doble pulsación rápida (double-tap) en una dirección para transicionar directo a carrera.
+  * **Dash Agachado (Crouch Dash):** Ejecutable desde cuclillas; es más corto, rápido y **esquiva ataques altos**.
+  * **Dash Aéreo / de Salto:** Ejecutable en el aire; **esquiva ataques por el suelo (lows)**.
+
+---
+
+## 6. Interacción de Ataques contra Movimiento
+- **Ataques Lineales:** Directos y frontales; **pueden ser esquivados** si el oponente ejecuta un paso o desplazamiento lateral (*sidestep*) preciso.
+- **Ataques de Área (Tracking / Sweeps):** Persiguen ("cazan") activamente a los personajes en movimiento, provocando **stun (aturdimiento)** o **derribo (knockdown)**.
+
+---
+
+## 7. Moveset Base (Estilo Boxeador / Yugo Style) & Estados de Combate
+El motor soporta opciones ofensivas y defensivas en todo momento: de pie, agachado, en el aire o en el suelo.
+- **Golpes Básicos (Neutral, Caminata, Carrera, Dash):** Jab, Ganchos, Uppers, Golpes al plexo y costillas. Cada estado de movimiento posee su propio moveset y animaciones diferenciadas (ataques en avance, retroceso, salto y laterales).
+- **Ataques Aéreos:** Se ejecutan combinando `Arriba-Arriba + Adelante/Atrás + Puño o Patada`.
+- **Cuadrúpedos y Deslizamientos:** Combinaciones del Botón de Acción con dirección y puño.
+
+**Variante visual:** las acciones de posición normal, agachado y salto cuentan con versiones explícitas diferenciadas según si el peleador da la **espalda a la cámara** o tiene el **frente hacia la cámara**.
+
+**Cómo se escribe un moveset (el ejemplo vivo es Pedro Pérez, `Src/core/fsm/states/Movesets.js`):** cada peleador viene de un **estilo base** y, por la calle de Sanpablera, lo adapta con formas variadas y mucha movilidad. Pedro empieza como **boxeador** y le crecen las capas: **patadas** (savate del puerto) → **pelea en el suelo** (derribo, sumisión) → **arma** (la botella). Un moveset son 4 piezas: frame data (`defineMove`), registro por claves (`registerMoves`: una clave base se SUSTITUYE, una clave nueva se SUMA), estados ATTACKING propios (`defineState`), y alcance (`Transitions.js`: reglas con `hasMove` que solo compiten si el moveset define el golpe).
+
+---
+
+## 8. Máquina de Estados Finitos (FSM) y Sistema de Suelo (Ground Game & Grappling)
+La FSM gestiona de forma estricta los estados complejos del combate:
+1. **Posiciones Base (4):** Aire, De pie (Normal), Agachado, Pecho tierra.
+2. **Estados de Suelo (2):** Caído sobre la espalda, Caído sobre el pecho.
+3. **Orientación respecto al Oponente:** Cabeza hacia el rival, pies hacia el rival, o ángulo intermedio.
+4. **Stances y Movilidad Especial:** De rodillas, cuadrúpeda, tropezando, cayendo lentamente.
+5. **Estados Aéreos y Juggle:** Juggler aéreo, lanzado fuertemente hacia atrás o hacia el aire.
+6. **Niveles de Impacto (Hit Levels):** Bajo, medio, fuerte.
+
+### Mecánicas de Suelo Interactivas:
+- **Modo Tortuga Defensivo (Rival Caído):** El jugador en el suelo puede presionar botones para rodar, defenderse de impactos a la lona, atrapar al rival para intentar una **inversión de posición (reversal)** y quedar arriba, o elevarse y saltar en múltiples direcciones.
+- **Modo Dominante / Castigo (Atacante):** El jugador dominante entra en una stance donde cada botón castiga una zona específica (cabeza, torso, costillas para obligar a girar la espalda), aplicar **sumisiones**, o ejecutar **proyecciones** desde el suelo y **remates despiadados**.
+- **Aproximación de Suelo:** Posibilidad de correr hacia el rival derribado o ejecutar deslizamientos en lona (*ground slides*) para castigar directamente en el suelo.
+
+---
+
+## 9. Características Técnicas (servicios y modos de juego)
+
+### 9.1 Peleador personalizado (implementado)
+- Un **peleador hecho por el jugador**: novena celda de la pantalla de selección.
+- **Renombrable** (tecla **R** con su celda enfocada) y **guardado en la memoria local del equipo donde juega** (`localStorage`, clave `sanpablera.customFighter`): sin cuenta, sin red.
+- Puede **heredar el moveset de un peleador del juego** (`baseId`): "un personaje del juego con su nombre". Con `baseId` vacío usa el set base del motor.
+- Módulo: `Src/core/CustomFighter.js` (carga/guardado/renombrado, testeable en Node sin navegador).
+
+### 9.2 Servicio en la nube (futuro)
+- El servicio en la nube **lo hará subapase** y será un **sistema de membresía**: la partida local (sección 9.1) es lo que el jugador tiene mientras tanto; la nube sincronizará y ampliará para miembros.
+
+### 9.3 Modo "Isla Caribe" (futuro)
+- Un **MMORPG** con los peleadores de Sanpablera donde **los jugadores crean la historia de Isla Caribe**.
+- Cada jugador **crea su personaje o usa un personaje del juego con su nombre** (la semilla ya está en 9.1: el peleador personalizado hereda movesets).
+
+---
+
+## 10. Arquitectura (cómo está organizado el código)
+- **Puro y testeable:** toda la lógica (FSM, frame data, transiciones, rig numérico, input) vive en `Src/core/` **sin importar Babylon**: se testea en Node (`npm test`).
+- **Babylon solo en `Src/render/` y `Src/core/Engine.js`:** el motor 3D es la última capa.
+- **Cableado:** UI táctil (`Src/ui/`) → `InputMapper` (d-pad + 4 botones → intents de la FSM, doble toque = dash, acorde ligero+pesado = técnica) → `FighterEntity` (locomoción, esquives, poses) → FSM (combate) + `FighterRig` (poses) → `CharacterModel` → Babylon.
+- **Datos, no ifs:** la tabla de transiciones (`Transitions.js`) es la única que decide "de aquí a allá"; depurar es `Transitions.explain()`.

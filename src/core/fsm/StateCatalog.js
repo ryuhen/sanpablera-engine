@@ -162,7 +162,15 @@ export function statesInGroup(group) {
  * Valida el catalogo contra el enum de States. Sin esto, anadir un estado al
  * enum y olvidar el cataleto produce un estado fantasma: la FSM entra en el, no
  * tiene perfil fisico y se rompe en runtime con un null.
+ *
+ * El rango 100+ esta RESERVADO a los estados propios de cada
+ * peleador (stances en CharacterStates.js, golpes en
+ * Movesets.js): no viven en el enum comun a proposito,
+ * para que un moveset nuevo no obligue a tocar el enum.
+ * Los ids duplicados los atrapa defineState al registrar.
  */
+const CHARACTER_STATE_ID_FLOOR = 100;
+
 export function validateCatalog() {
     const missing = [];
     const extra = [];
@@ -170,6 +178,7 @@ export function validateCatalog() {
         if (!registry.has(State[key])) missing.push(key);
     }
     for (const state of registry.values()) {
+        if (state.id >= CHARACTER_STATE_ID_FLOOR) continue;
         if (Object.keys(State).find((k) => State[k] === state.id) === undefined) {
             extra.push(state.name + ' (' + state.id + ')');
         }
