@@ -81,8 +81,14 @@ function facingToward(x, z, tx, tz) {
     return Math.atan2(tx - x, tz - z);
 }
 
-// Dentro del ring: los peleadores no salen de este radio (suelo de 3,1 m).
+// Radio del ring. Pasarse es una FALTA, no una pared: el peleador que se sale
+// pierde vida y los dos vuelven al centro (ver world.ringOut). El suelo de la
+// escena mide 24 m, asi que hay de sobra para salirse un poco sin caerse.
 const RING_LIMIT = 2.8;
+// Vida que se pierde por salirse del ring.
+const RING_OUT_DAMAGE = 50;
+// Frames de congelacion cuando alguien se sale: da el golpe de efecto.
+const RING_OUT_HITSTOP = 14;
 // Distancia minima al rival: nadie se pisa para "meterse" en el otro.
 const MIN_SPACING = 0.9;
 // Volumen de colision de un peleador (para la hitbox del rival).
@@ -361,6 +367,54 @@ const world = {
         if (entities.length < 2) return null;
         const i = entities.indexOf(entity);
         return entities[(i + 1) % entities.length] || null;
+    },
+
+    /** La entidad del peleador que NO es `fighter` (o null). */
+    opponentByFighter(fighter) {
+        return entities.find((e) => e.fighter && e.fighter.name !== fighter.name) || null;
+    },
+
+    /**
+     * REGLA DEL RING: salirse del ring es una falta.
+     *
+     * El peleador que cruza el limite paga RING_OUT_DAMAGE de vida y los dos
+     * vuelven al centro. Antes el limite era una pared invisible (se recortaba
+     * la posicion dentro de FighterEntity), con lo que nadie podia salirse
+     * nunca y la regla no tendria sentido: empujar al rival hacia las cuerdas
+     * era imposible.
+     *
+     * @returns {string|null} nombre del que se salio, o null si nadie fallo
+     */
+    ringOut() {
+        let fuera = null;
+        for (const f of fighters) {
+            if (Math.hypot(f.x, f.z) > this.ringLimit) { fuera = f; break; }
+        }
+        if (!fuera) return null;
+
+        fuera.health = Math.max(0, fuera.health - RING_OUT_DAMAGE);
+        this.hitstop = Math.max(this.hitstop, RING_OUT_HITSTOP);
+
+        const rivalEnt = this.opponentByFighter(fuera);
+        const rival = rivalEnt ? rivalEnt.fighter : null;
+        // Los dos al centro. La inercia se limpia porque si no, el que iba
+        // lanzado seguia empujando al otro nada mas reaparecer.
+        for (const f of fighters) { f.x = 0; f.z = 0; }
+        // Separados lo justo para no violar MIN_SPACING al instante, y mirando
+        // al otro otra vez. Ojo: `facing` se queda en NaN si no se recalcula,
+        // porque con los dos en el centro no hay direccion.
+        if (rival && fighters.length >= 2) {
+            fuera.x = -MIN_SPACING / 2;
+            rival.x = MIN_SPACING / 2;
+            fuera.facing = facingToward(fuera.x, fuera.z, rival.x, rival.z);
+            rival.facing = facingToward(rival.x, rival.z, fuera.x, fuera.z);
+        }
+        for (const ent of entities) {
+            if (typeof ent.vx === 'number') ent.vx = 0;
+            if (typeof ent.vz === 'number') ent.vz = 0;
+        }
+        inputMapper.reset();
+        return fuera.name;
     },
 
     /**
@@ -682,6 +736,17 @@ function render() {
             entities[i].update(dt, i === 0 ? input : IDLE_INPUT, world);
         }
         for (const prop of world.props) prop.update(dt);
+
+        // Quien se sale del ring paga 50 de vida y los dos vuelven al centro.
+        // Se comprueba DESPUES de mover a todos, no dentro de la entidad: si
+        // se hiciera ahi, el rival podria "arrastrar" al otro fuera el mismo
+        // frame en que se mueve, y la falta se adjudicaria a quien todavia no
+        // ha salido.
+        const fuera = world.ringOut();
+        if (fuera) {
+            inputMapper.reset();
+            console.log(fuera + ' se salio del ring: -' + RING_OUT_DAMAGE + ' de vida');
+        }
     }
 
     fitCamera(dt);

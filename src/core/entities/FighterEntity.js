@@ -733,13 +733,11 @@ export class FighterEntity {
         this._moveSpeed = Math.hypot(mvx, mvz);
         this._moving = this._moveSpeed > 0.05 || Math.hypot(this.vx, this.vz) > 0.3;
 
-        // Anillo: limite radial y separacion minima con el rival.
-        const radius = Math.hypot(f.x, f.z);
-        if (radius > world.ringLimit) {
-            const s = world.ringLimit / radius;
-            f.x *= s;
-            f.z *= s;
-        }
+        // Anillo: separacion minima con el rival. El LIMITE DEL RING ya no se
+        // aplica aqui como pared: salirse es una falta que se penaliza (ver
+        // world.ringOut), asi que el limite se comprueba DESPUES de mover, en el
+        // bucle del engine. Si se recortase aqui, nadie podria salirse nunca y
+        // la regla no tendria sentido.
         if (o) {
             const dox = o.fighter.x - f.x;
             const doz = o.fighter.z - f.z;
