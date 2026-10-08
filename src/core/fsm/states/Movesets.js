@@ -43,6 +43,18 @@
  *     directo ....... ligero ................ LINEAL, MEDIO
  *     gancho ........ adelante + ligero ...... LINEAL, MEDIO (entra)
  *     codazo ........ atrás + ligero ......... LINEAL, ALTO
+ *   CAPA 1b · ESTANCIAS (el sistema de posturas de boxeo)
+ *     El arquetipo YUGO tiene TRES posturas rotativas y tres
+ *     de comando (core/boxing.js). Cada una tiene SU propio
+ *     moveset, y en CUALQUIER fotograma en que la postura
+ *     este activa (incluso a mitad de una transicion) el
+ *     peleador puede usarla:
+ *       SHELL  (Peek-a-Boo)  ligero -> corto · pesado -> ascendente
+ *       LEAD   (Puo al frente) ligero -> jab largo · pesado -> cruzado
+ *       RELAX  (Descansada)   ligero -> gancho · pesado -> patada baja
+ *       PRESS  (Presion)      ligero -> recto · pesado -> gancho
+ *       ABSORB (Absorcion)    ligero -> corto · pesado -> patada baja
+ *       CATCH  (Atrapamiento) ligero -> costillazo · pesado -> proyeccion
  *   CAPA 2 · PATADAS (la adaptacion del puerto: savate)
  *     patada giratoria  pesado ............... AREA, MEDIO (caza)
  *     patada frontal .. adelante + pesado .... LINEAL, MEDIO (distancia)
@@ -133,6 +145,116 @@ registerMoves('PEDRO', {
         cancelTier: CancelTier.LIGHT, meterGain: 8, meterCost: 0,
         hitstop: 5, radius: 0.42, forward: 0.4, centerY: 1.3,
         clip: 'sp_codo'
+    }),
+
+    // --- CAPA 1b · EL MOVESET DE LAS ESTANCIAS (arquetipo YUGO) --------
+    // Cada postura de boxeo (core/boxing.js) tiene SU PROPIO
+    // moveset, accesible en cualquier fotograma en que este
+    // activa (ver FighterEntity.stanceAttack). Estos son los
+    // golpes que sustituyen a los del set base segun la
+    // postura: el mismo boton, lectura distinta.
+    //
+    //   SHELL / ABSORB · golpe corto -> jab minimo y
+    //     barato: es la respuesta mientras se absorbe.
+    GOLPE_CORTO: defineMove('GOLPE_CORTO', {
+        label: 'Corto', state: State.ATAQUE_LIGERO,
+        startup: 2, active: 2, recovery: 5,
+        damage: 5, hitstun: 10, blockstun: 6,
+        hitLevel: HitLevel.MEDIO, breaksGuardHeight: GuardHeight.MEDIA,
+        type: 'LINEAL', height: 'MEDIO',   // lo esquiva el paso
+        cancelTier: CancelTier.LIGHT, meterGain: 7, meterCost: 0,
+        hitstop: 3, radius: 0.42, forward: 0.40, centerY: 1.22,
+        clip: 'st_corto'
+    }),
+    //   LEAD · jab largo: el alcance que controla el espacio
+    //   frontal. Rapido y con mas mano.
+    JAB_LARGO: defineMove('JAB_LARGO', {
+        label: 'Jab largo', state: State.ATAQUE_LIGERO,
+        startup: 3, active: 2, recovery: 7,
+        damage: 6, hitstun: 11, blockstun: 7,
+        hitLevel: HitLevel.MEDIO, breaksGuardHeight: GuardHeight.MEDIA,
+        type: 'LINEAL', height: 'MEDIO',
+        cancelTier: CancelTier.LIGHT, meterGain: 8, meterCost: 0,
+        hitstop: 4, radius: 0.5, forward: 0.78, centerY: 1.18,
+        clip: 'st_jab_largo'
+    }),
+    //   SHELL · upper: el angel. Sube por debajo de la guardia
+    //   (rompe ALTA) y tira al rival hacia arriba.
+    UPPERCUT: defineMove('UPPERCUT', {
+        label: 'Ascendente', state: State.ATAQUE_PESADO,
+        startup: 6, active: 3, recovery: 12,
+        damage: 10, hitstun: 17, blockstun: 10,
+        hitLevel: HitLevel.MEDIO, breaksGuardHeight: GuardHeight.ALTA,
+        type: 'LINEAL', height: 'ALTO',   // el dash agachado lo esquiva
+        knockdown: 'LIGHT', launchX: 1.4, launchY: 3.4, juggleAdd: 1,
+        cancelTier: CancelTier.HEAVY, meterGain: 10, meterCost: 0,
+        hitstop: 8, radius: 0.5, forward: 0.5, centerY: 1.42,
+        clip: 'st_uppercut'
+    }),
+    //   LEAD · cruzado: el recto de potencia. LINEAL y con
+    //   mas empuje: es la respuesta larga del jab.
+    CRUZADO: defineMove('CRUZADO', {
+        label: 'Cruzado', state: State.ATAQUE_PESADO,
+        startup: 7, active: 3, recovery: 12,
+        damage: 11, hitstun: 18, blockstun: 10,
+        hitLevel: HitLevel.MEDIO, breaksGuardHeight: GuardHeight.ALTA,
+        type: 'LINEAL', height: 'MEDIO',
+        cancelTier: CancelTier.HEAVY, meterGain: 11, meterCost: 0,
+        hitstop: 8, radius: 0.56, forward: 0.82, centerY: 1.16,
+        clip: 'st_cruzado'
+    }),
+    //   PRESS · recto de presion: rapido y con la guardia
+    //   rota (rompe la guardia BAJA): abre la secuencia.
+    RECTO: defineMove('RECTO', {
+        label: 'Recto', state: State.ATAQUE_LIGERO,
+        startup: 5, active: 2, recovery: 9,
+        damage: 8, hitstun: 15, blockstun: 9,
+        hitLevel: HitLevel.MEDIO, breaksGuardHeight: GuardHeight.MEDIA,
+        type: 'LINEAL', height: 'MEDIO',
+        cancelTier: CancelTier.LIGHT, meterGain: 9, meterCost: 0,
+        hitstop: 6, radius: 0.52, forward: 0.68, centerY: 1.18,
+        clip: 'st_recto'
+    }),
+    //   RELAX / ABSORB · patada baja: el arma de las
+    //   posturas bajas. LINEAL por el suelo (el dash
+    //   saltando la salta) y levanta al rival.
+    PATADA_BAJA: defineMove('PATADA_BAJA', {
+        label: 'Patada baja', state: State.ATAQUE_PESADO,
+        startup: 7, active: 3, recovery: 14,
+        damage: 7, hitstun: 16, blockstun: 9,
+        hitLevel: HitLevel.MEDIO, breaksGuardHeight: GuardHeight.BAJA,
+        type: 'LINEAL', height: 'BAJO',   // el dash saltando la esquiva
+        knockdown: 'LIGHT', launchX: 1.2, launchY: 1.6, juggleAdd: 0,
+        cancelTier: CancelTier.HEAVY, meterGain: 9, meterCost: 0,
+        hitstop: 7, radius: 0.62, forward: 0.72, centerY: 0.5,
+        clip: 'st_patada_baja'
+    }),
+    //   CATCH · costillazo: el trabajo del abrazo tactico,
+    //   a la altura de las costillas (el unico golpe que
+    //   la postura de atrapar necesita para el remate).
+    COSTILLAZO: defineMove('COSTILLAZO', {
+        label: 'Costillazo', state: State.ATAQUE_LIGERO,
+        startup: 4, active: 2, recovery: 8,
+        damage: 7, hitstun: 14, blockstun: 8,
+        hitLevel: HitLevel.MEDIO, breaksGuardHeight: GuardHeight.MEDIA,
+        type: 'LINEAL', height: 'MEDIO',
+        cancelTier: CancelTier.LIGHT, meterGain: 8, meterCost: 0,
+        hitstop: 5, radius: 0.44, forward: 0.42, centerY: 0.82,
+        clip: 'st_costillas'
+    }),
+    //   CATCH · proyeccion: el remate del abrazo. AREA y
+    //   con derribo garantizado: el suelo es del que
+    //   atrapa patadas.
+    PROYECCION: defineMove('PROYECCION', {
+        label: 'Proyección', state: State.ATAQUE_PESADO,
+        startup: 10, active: 4, recovery: 22,
+        damage: 14, hitstun: 24, blockstun: 0,
+        hitLevel: HitLevel.FUERTE, breaksGuardHeight: GuardHeight.ALTA,
+        type: 'AREA', height: 'MEDIO',
+        knockdown: 'ALWAYS', launchX: 5.4, launchY: 3.2, juggleAdd: 2,
+        cancelTier: CancelTier.HEAVY, meterGain: 14, meterCost: 0,
+        hitstop: 14, radius: 0.86, forward: 0.9, centerY: 0.95,
+        clip: 'st_proyeccion'
     }),
 
     // --- CAPA 2 · PATADAS ----------------------------------------------

@@ -130,6 +130,33 @@ export function locoPose(rig, locoState, opts = {}) {
 }
 
 /**
+ * Brazos por postura de boxeo (core/boxing.js). Cada `arms` de la
+ * postura apunta a una de estas: donde caen las manos y cuanto
+ * se hunde o levanta la cadera. Es la lectura a un golpe de vista
+ * de si el peleador esta en Shell, en Lead o en Relax.
+ */
+const STANCE_ARMS = Object.freeze({
+    COMPACT: Object.freeze({      // SHELL: codos pegados, rostro tapado
+        L: [0.13, 1.34, 0.18], R: [-0.13, 1.34, 0.18]
+    }),
+    EXTENDED: Object.freeze({    // LEAD: mano de jab adelantada
+        L: [0.14, 1.22, 0.68], R: [-0.24, 1.14, 0.12]
+    }),
+    DROPPED: Object.freeze({     // RELAX: un puno a la altura de la rodilla
+        L: [0.24, 0.56, 0.22], R: [-0.20, 1.18, 0.22], hip: -0.04
+    }),
+    ADVANCED: Object.freeze({    // PRESS: manos en punta, encima del rival
+        L: [0.12, 1.30, 0.60], R: [-0.10, 1.32, 0.52]
+    }),
+    COVER_COUNTER: Object.freeze({   // ABSORB: un brazo cubre, el otro carga
+        L: [0.10, 1.36, 0.12], R: [-0.34, 1.06, -0.12]
+    }),
+    TRAP: Object.freeze({        // CATCH: agarra abajo, cuerpo alzado
+        L: [0.26, 0.76, 0.34], R: [-0.22, 0.82, 0.30], hip: 0.03
+    })
+});
+
+/**
  * Pose de una postura cualquiera del catalogo, con los pies plantados.
  *
  * @param rig     rig numerico (cine/Rig.js)
@@ -156,16 +183,50 @@ export function posturePose(rig, posture, opts = {}) {
     // medio ring). Efecto sutil: solo ajusta, no decide nada.
     const near = opts.dist != null ? clamp01((0.9 - opts.dist) / 0.9) : 0;
 
+    // --- SILUETA DE POSTURA (arquetipo YUGO) -------------------------
+    // Si la entidad pasa opts.stance (core/boxing.js), ESA silueta
+    // manda sobre la del estado: es lo que hace que SHELL, LEAD,
+    // RELAX... se vean de verdad distintas. La entidad ya ha
+    // interpolado el baile, asi que aqui solo llega una silueta.
+    const st = opts.stance || null;
+    const sil = st && st.silhouette;
+    const spread = sil ? sil.spread : base.spread + (mod.spreadBonus || 0);
+    const lead = sil ? sil.lead : base.lead + (mod.leadBonus || 0);
+    const lean = sil ? sil.lean : base.lean + (mod.leanBonus || 0);
+    const guard = clamp01(sil ? sil.guard : base.guard + (mod.guardBonus || 0));
+
     const spec = Object.freeze({
-        spread: Math.max(0.2, (base.spread + (mod.spreadBonus || 0)) - near * 0.05),
-        lead: base.lead + (mod.leadBonus || 0),
-        lean: (base.lean + (mod.leanBonus || 0)) * (1 + near * 0.4),
-        guard: clamp01(base.guard + (mod.guardBonus || 0)),
-        crouch: Math.min(0.55, crouch),
-        hands: handsFor(clamp01(base.guard + (mod.guardBonus || 0)))
+        spread: Math.max(0.2, spread - near * 0.05),
+        lead,
+        lean: lean * (1 + near * 0.4),
+        guard,
+        crouch: Math.min(0.55, crouch + (sil ? (sil.crouch || 0) : 0)),
+        hands: handsFor(guard)
     });
 
     const res = stancePose(rig, spec, { forward: opts.forward === undefined ? 1 : opts.forward });
+
+    // Brazos de la postura: SHELL compacta los codos, LEAD adelanta
+    // la mano, RELAX baja un puno a la rodilla, ABSORB cubre con un
+    // brazo y guarda el otro para castigar, CATCH agarra abajo...
+    if (st && st.arms && STANCE_ARMS[st.arms]) {
+        const arms = STANCE_ARMS[st.arms];
+        let state = res.state;
+        // La postura baja hunde la cadera (RELAX) o la levanta (CATCH).
+        if (arms.hip) {
+            const cur = res.pose.pos && res.pose.pos.PELVIS ? res.pose.pos.PELVIS : [0, 0, 0];
+            setPos(res.pose, 'PELVIS', [cur[0], cur[1] + arms.hip, cur[2]]);
+            state = fk(rig, res.pose, state);
+        }
+        solveTwoBone(rig, res.pose, state, {
+            upper: 'UPPERARM_L', lower: 'FOREARM_L', target: arms.L, pole: [1, 0, 0]
+        });
+        state = fk(rig, res.pose, state);
+        solveTwoBone(rig, res.pose, state, {
+            upper: 'UPPERARM_R', lower: 'FOREARM_R', target: arms.R, pole: [-1, 0, 0]
+        });
+        res.state = fk(rig, res.pose, state);
+    }
 
     // TAUNT: la pose de "baile" (el boton multiple la muestra). Los
     // brazos suben y el torso se balancea; no es una postura de combate.
@@ -223,6 +284,69 @@ const ATTACK_KEYS = Object.freeze({
         startup: [0.34, 1.08, 0.10],
         active: [0.10, 1.14, 0.72],
         twist: Object.freeze({ startup: -0.34, active: 0.66, recovery: 0 })
+    }),
+    // --- ESTANCIAS DE BOXEO (arquetipo YUGO) -------------------------
+    // Los golpes de cada postura tienen silueta propia: el jab
+    // largo estira el brazo, el ascendente sube, el costillazo
+    // baja al torso y la proyeccion se lanza.
+    GOLPE_CORTO: Object.freeze({
+        limb: 'arm',
+        home: [0.20, 1.22, 0.22],
+        startup: [0.12, 1.10, 0.06],
+        active: [0.02, 1.30, 0.74],
+        twist: Object.freeze({ startup: -0.10, active: 0.40, recovery: 0 })
+    }),
+    JAB_LARGO: Object.freeze({
+        limb: 'arm',
+        home: [0.26, 1.16, 0.24],
+        startup: [0.16, 1.08, 0.08],
+        active: [0.04, 1.20, 1.02],
+        twist: Object.freeze({ startup: -0.18, active: 0.34, recovery: 0 })
+    }),
+    UPPERCUT: Object.freeze({
+        limb: 'arm',
+        home: [0.20, 1.22, 0.22],
+        startup: [0.14, 0.86, 0.02],
+        active: [0.04, 1.52, 0.56],
+        twist: Object.freeze({ startup: -0.06, active: 0.24, recovery: 0 }),
+        pitch: Object.freeze({ startup: 0.16, active: 0.10, recovery: 0 })
+    }),
+    CRUZADO: Object.freeze({
+        limb: 'arm',
+        home: [0.24, 1.16, 0.24],
+        startup: [0.20, 1.10, -0.06],
+        active: [0.06, 1.20, 1.00],
+        twist: Object.freeze({ startup: -0.24, active: 0.58, recovery: 0 })
+    }),
+    RECTO: Object.freeze({
+        limb: 'arm',
+        home: [0.26, 1.16, 0.24],
+        startup: [0.18, 1.06, 0.02],
+        active: [0.04, 1.20, 0.88],
+        twist: Object.freeze({ startup: -0.20, active: 0.44, recovery: 0 })
+    }),
+    PATADA_BAJA: Object.freeze({
+        limb: 'leg',
+        home: [0.20, 0.02, 0.12],
+        startup: [0.16, 0.34, 0.02],
+        active: [0.02, 0.56, 0.86],
+        twist: Object.freeze({ startup: 0.14, active: -0.24, recovery: 0 }),
+        hipDrop: 0.10
+    }),
+    COSTILLAZO: Object.freeze({
+        limb: 'arm',
+        home: [0.20, 1.16, 0.22],
+        startup: [0.16, 0.98, 0.10],
+        active: [0.04, 0.86, 0.62],
+        twist: Object.freeze({ startup: -0.08, active: 0.30, recovery: 0 }),
+        pitch: Object.freeze({ startup: 0.14, active: 0.22, recovery: 0 })
+    }),
+    PROYECCION: Object.freeze({
+        limb: 'lunge',
+        home: [0.20, 0.02, 0.12],
+        startup: [0.22, 0.10, 0.18],
+        active: [0.12, 0.06, 0.72],
+        twist: Object.freeze({ startup: 0.14, active: 0.30, recovery: 0 })
     }),
     PATADA_FRONTAL: Object.freeze({
         limb: 'leg',
@@ -545,5 +669,6 @@ export function poseFor(rig, snap, opts = {}) {
 
 export default {
     posturePose, attackPose, flinchPose, downPose, floatPose, poseFor, locoPose,
-    ATTACK_KEYS, LIMB_SPECS, STYLE_MODS, LOCO_POSTURES, ATTACK_LOCO_MODS
+    ATTACK_KEYS, LIMB_SPECS, STYLE_MODS, LOCO_POSTURES, ATTACK_LOCO_MODS,
+    STANCE_ARMS
 };

@@ -6,7 +6,8 @@ Esta bitácora nos permite registrar y sincronizar las actividades realizadas en
 
 | Fecha | Autor | Commit | Actividad | Notas |
 |---|---|---|---|---|
-| 2026-10-07 | Sistema | *este commit* | Biblia de diseño, moveset por capas y el peleador del jugador | `Specs.txt` ahora ES la biblia de diseño (las 8 secciones de jugabilidad + caracteristicas tecnicas: peleador personalizado en `localStorage`, la nube por **subapase** en sistema de membresia y el MMORPG **"Isla Caribe"**). Roster renombrado a nombres comunes y memorables (Pedro Pérez, Juan García, José López, María González, John Doe, Jane Doe, Carlos Ruiz, Ana Torres) con historia y estilo de pelea por peleador. Moveset de Pedro escrito capa por capa en `fsm/states/Movesets.js` (**boxeo → patadas → suelo → botella**): `hasMove` en la tabla de transiciones hace que un moveset amplie el vocabulario sin tocar la FSM ni romper al resto. Peleador del jugador (`CustomFighter.js`): novena celda, renombrable con **R**, guardado local, hereda el moveset de un peleador del juego. Input: acorde ligero+pesado = TECNICA (derribo), toque del boton ACCION = ESPECIAL, eventos pointer en la UI tactil (probable con raton). **450 ok, 0 fallos** |
+| 2026-10-07 | Sistema | *este commit* | Arquetipos base, roadmap de fases y el sistema de estancias del boxeador | `Specs.txt` crece con las secciones **11 (los tres arquetipos base: YUGO el boxeador, MONTE el salvaje y MUSASHI el vagabundo marcial, con el kenjutsu improvisado), 12 (escalada de combate por fases: el arbitro y la ventana de 1 s de la Fase 1, el callejero a KO de la 2, las armas portatiles de la 3 y el desarme/apropiacion de la 4) y 13 (el sistema de estancias de boxeo)**. Todo entra como MODULO PURO: `core/archetypes.js`, `core/phases.js` y `core/boxing.js` son tablas que el motor lee; el roster declara el arquetipo de cada peleador. Las estancias (rotacion con el boton de accion, inversion con atras, el "baile de posiciones" por tilt, la fijacion post-golpe con encadenado automatico, y las tres posturas de comando: presion, absorcion y atrapamiento) se resuelven en `FighterEntity._stances`; el golpe de la postura sustituye al del estado en el getter `move` de la FSM (mismo estado, distinta lectura). Pedro recibe su moveset exclusivo capa por capa (capa 1b de `Movesets.js`). Se sustituye el antiguo abanico de estilos cosmeticos por posturas de combate reales, y el toque del boton de accion deja de disparar el especial: ahora lo hace el doble toque (para que el botellazo siga siendo alcanzable). **517 comprobaciones, 0 fallos** (nuevo `tests/design.smoke.mjs`, 67 checks) |
+| 2026-10-07 | Sistema | `fff6741` | Biblia de diseño, moveset por capas y el peleador del jugador | `Specs.txt` ahora ES la biblia de diseño (las 8 secciones de jugabilidad + caracteristicas tecnicas: peleador personalizado en `localStorage`, la nube por **subapase** en sistema de membresia y el MMORPG **"Isla Caribe"**). Roster renombrado a nombres comunes y memorables (Pedro Pérez, Juan García, José López, María González, John Doe, Jane Doe, Carlos Ruiz, Ana Torres) con historia y estilo de pelea por peleador. Moveset de Pedro escrito capa por capa en `fsm/states/Movesets.js` (**boxeo → patadas → suelo → botella**): `hasMove` en la tabla de transiciones hace que un moveset amplie el vocabulario sin tocar la FSM ni romper al resto. Peleador del jugador (`CustomFighter.js`): novena celda, renombrable con **R**, guardado local, hereda el moveset de un peleador del juego. Input: acorde ligero+pesado = TECNICA (derribo), toque del boton ACCION = ESPECIAL, eventos pointer en la UI tactil (probable con raton). **450 ok, 0 fallos** |
 | 2025-10-04 | Sistema | `a6c6aa1` | Revisión inicial del proyecto | Se analizaron archivos HTML, JS y estructura del proyecto |
 | 2026-10-04 | Sistema | `d96057b` | Recuperación de trabajo perdido | La FSM solo existía en el árbol local sin commitear: recuperación de 5.351 líneas. Se corrigió la ruta de `aiAssistant.js` en `index.html` (`./src/tools/aiAssistant.js`) y se añadieron los scripts `start` y `test` a `package.json` |
 | 2026-10-04 | Sistema | `afd2d06` | Integración de la rama de respaldo | Merge de `backup/github-babylon-2026-10-04`. Se conservaron sus stubs (`index.ts`, `Src/index.ts`) y se descartaron las copias vendorizadas de Babylon (idénticas a `node_modules/babylonjs/`). **Advertencia:** esos stubs importaban `core/Legacy/legacy`, que no existe |
@@ -68,7 +69,11 @@ pendiente la confirmación visual en el navegador.
 - [x] Roster con nombres comunes memorables, historia y estilo por peleador (`core/roster.js`)
 - [x] Peleador del jugador: localStorage, renombrable (R en la selección), hereda movesets (`core/CustomFighter.js`, `ui/SelectScreen.js`)
 - [x] Eventos pointer en la UI táctil (`ui/UI.js`): el pad y los botones responden al ratón/estilo además del dedo
-- [x] `npm test` en verde: **450 comprobaciones, 0 fallos** (FSM 68 · Cine 333 · HUD 23 · Stamina 26)
+- [x] `npm test` en verde: **517 comprobaciones, 0 fallos** (FSM 68 · Design 67 · Cine 333 · HUD 23 · Stamina 26)
+- [x] Los tres arquetipos base registrados como datos puros (`core/archetypes.js`) y asignados al roster
+- [x] Escalada de combate por fases como tabla modular (`core/phases.js`): arbitro, ventana de 1 s, zonas legales/ilegales, armas y desarme
+- [x] Sistema de estancias del arquetipo YUGO (`core/boxing.js` + `FighterEntity._stances`): rotacion, inversion, baile, fijacion y las tres posturas de comando
+- [x] Moveset exclusivo de cada postura en el primer peleador (`Movesets.js` capa 1b) y poses procedurales (`FighterRig.js`)
 
 ### Verificación: la biblia (Specs.txt) contra el motor
 
@@ -92,6 +97,9 @@ Lo que exige la biblia de diseño y dónde está hoy:
 | 9.1 Peleador personalizado (localStorage, renombrable) | ✅ hecho | `core/CustomFighter.js`, `ui/SelectScreen.js` |
 | 9.2 Nube por subapase (membresía) | ⏳ futuro | Documentado en Specs 9.2 |
 | 9.3 MMORPG "Isla Caribe" | ⏳ futuro | Documentado en Specs 9.3 |
+| 11. Arquetipos base (YUGO / MONTE / MUSASHI) | ✅ hecho | `core/archetypes.js`; cada peleador del roster declara el suyo |
+| 12. Escalada por fases (datos modulares) | ✅ hecho (tabla) · ⏳ aplicar | `core/phases.js`: reglas, arbitro, ventana, zonas y armas por fase |
+| 13. Estancias de boxeo (rotación, baile, Target Action, comando) | ✅ hecho | `core/boxing.js` + `FighterEntity._stances` + poses en `FighterRig.js` |
 
 ### Pendiente (siguiente sesión)
 
@@ -122,6 +130,14 @@ Lo que exige la biblia de diseño y dónde está hoy:
       por movimiento.
 - [ ] **Castigo en el suelo** (biblia 8): ataques contra el rival
       caído (`isDownAttack`) y ground slides ofensivos.
+- [ ] **Aplicar las fases al combate** (Specs 12): las reglas ya
+      están como datos (`core/phases.js`), falta que el referee,
+      la ventana de 1 s en el suelo, los jueces con tarjetas y el
+      desbloqueo de armas las consulten en runtime.
+- [ ] **Stances como estados de la FSM** (Specs 8): hoy las
+      posturas son de la entidad (silueta + moveset); falta que la
+      FSM las conozca para transiciones y animaciones propias.
+- [ ] **Desarme / apropiación del arma rival** (Specs 12, fase 4).
 
 ### Bloqueos
 

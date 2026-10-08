@@ -363,6 +363,9 @@ const world = {
                 }
                 if (verdict.hit) {
                     opp.takeHit(move, attacker, this, verdict.bonus);
+                    // Mi golpe conecto: la entidad lo apunta para la
+                    // fijacion (TARGET ACTION: accion tras conectar).
+                    attacker.onHitLanded(move, this);
                     return 'hit';
                 }
                 return 'dodged';
@@ -424,23 +427,21 @@ function cameraGroundBasis() {
 }
 
 /**
- * BOTON MULTIPLE (ACCION). Un boton, varios usos, por
- * tiempo de pulsacion y contexto:
+ * BOTON MULTIPLE (ACCION) · lo que le toca al ENGINE.
+ * El resto (rotacion de posturas, baile, fijacion y el especial
+ * del doble toque) lo resuelve la entidad en `_stances`, que lee
+ * las mismas aristas. Aqui solo queda lo que necesita el mundo:
  *
- *   - Toque corto ........ ESPECIAL (el golpe de
- *     recurso: el botellazo de Pedro, la onda base de
- *     cualquier otro) o INTERACTUAR con la utileria
- *     cercana (el saco).
- *   - Mantenido (>=0,32 s) modo TARGET: encarado automatico
- *     al rival y zoom de camara.
- *   - Con puño + diagonal .. combos de movimiento (cuadrupedia y
- *     deslizamiento): la pulsacion se CONSUME y no dispara
- *     ni especial ni target.
+ *   - Mantenido (>=0,32 s)  modo TARGET: encarado automatico al
+ *     rival y zoom de camara. No se pisa con la fijacion de
+ *     combate (TARGET ACTION), que tambien usa ACCION.
+ *   - Con puño + diagonal  combos de movimiento (cuadrupedia y
+ *     deslizamiento): la pulsacion se CONSUME.
+ *   - Al soltar sobre utileria .. INTERACTUAR con el saco. Se
+ *     marca `consumedByProp` para que el toque no rota postura.
  *
- * El especial se dispara al SOLTAR (como el interactuar):
- * asi un toque corto sigue siendo un toque aunque el
- * jugador aguante un instante, y el modo target no tira
- * el golpe por accidente.
+ * El toque corto SIN utileria lo consume la entidad: rota postura,
+ * o doble toque = especial.
  */
 const action = { held: false, since: 0, targeting: false, consumed: false };
 
@@ -470,8 +471,11 @@ function updateActionButton(input, dt) {
         if (!action.consumed && (input.quadEdge || input.slideEdge)) {
             action.consumed = true;
         }
-        // Mantenido: modo target.
-        if (!action.targeting && !action.consumed && action.since >= TARGET_HOLD) {
+        // Mantenido: modo target de CAMARA (si no hay fijacion de
+        // combate activa, que es lo que el jugador quiere al mantener).
+        const fixing = player.stance && player.stance.target;
+        if (!action.targeting && !action.consumed && !fixing &&
+            action.since >= TARGET_HOLD) {
             action.targeting = true;
             player.targetLock = true;
         }
@@ -481,13 +485,9 @@ function updateActionButton(input, dt) {
             player.targetLock = false;
         } else if (!action.consumed) {
             const prop = nearestProp(player, INTERACT_RANGE);
-            if (prop) prop.interact(player);
-            else {
-                // Toque corto y sin utileria cerca: EL ESPECIAL.
-                // El intent lo resuelve la tabla de transiciones
-                // (y el frame data del moveset del peleador),
-                // igual que cualquier otro golpe.
-                input.pressed[Intent.ATAQUE_ESPECIAL] = true;
+            if (prop) {
+                prop.interact(player);
+                input.consumedByProp = true;
             }
         }
         action.held = false;
@@ -545,7 +545,7 @@ async function boot() {
             model: f.model,
             characterId: f.characterId || 'BASE',
             id: f.name,
-            stance: f.name === 'P2' ? 'GUARD' : 'IDLE'
+            stance: f.name === 'P2' ? 'RELAX' : 'SHELL'
         }));
     }
 
@@ -683,11 +683,13 @@ window.SANPABLERA.punch = function (name, moveKey) {
     return true;
 };
 
-/** Cicla la postura del peleador (el abanico del boton multiple). */
-window.SANPABLERA.stance = function (name) {
+/** Elige la postura del peleador (SHELL · LEAD · RELAX · PRESS...). */
+window.SANPABLERA.stance = function (name, id) {
     const e = entities.find(x => x.fighter.name === name);
     if (!e) return;
-    e.style = nextStance(e.style);
+    if (id) e._adopt(id);
+    else e._startDance([nextStance(e.stance.id, false)]);
+    return e.stance.id;
 };
 
 /** Activa / desactiva el candado de target de un peleador. */

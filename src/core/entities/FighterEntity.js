@@ -32,17 +32,33 @@ import SPF from '../fsm/Constants.js';
 import { getMoves } from '../fsm/MoveTable.js';
 import { createProfile, defineState } from '../fsm/StateCatalog.js';
 import { registerCharacterStances } from '../fsm/states/CharacterStates.js';
+import * as Boxer from '../boxing.js';
 import * as FighterRig from './FighterRig.js';
 
 const { State, StateGroup, Intent, TransitionSource, CONFIG } = SPF;
 
-/** El abanico de estilos del boton multiple (action). */
-export const STYLE_STANCES = Object.freeze(['IDLE', 'GUARD', 'PRESSING', 'DEFENSIVE', 'TAUNT']);
+/**
+ * EL SISTEMA DE ESTANCIAS (core/boxing.js).
+ *
+ * Antes habia aqui un abanico de estilos cosméticos (IDLE,
+ * GUARD, TAUNT...) que solo cambiaba la pose. Ahora la postura
+ * es una DECISION DE COMBATE: cada una declara su guardia, su
+ * silueta y, sobre todo, SU MOVESET EXCLUSIVO (stanceAttack),
+ * asi que el mismo boton golpea distinto segun la postura.
+ *
+ * Las tres base rotan con el boton ACCION; las tres de comando
+ * son inputs especiales. El boton tambien trae el "baile" de
+ * posturas (tilt a una direccional), el mantenimiento que
+ * dirige la postura a un vector, y la fijacion de objetivo
+ * (TARGET ACTION) tras conectar un golpe.
+ */
+export const STANCES = Boxer.STANCES;
+export const STANCE_CYCLE = Boxer.STANCE_CYCLE;
+export const COMMAND_STANCES = Boxer.COMMAND_STANCES;
 
-/** Siguiente estilo del abanico (ciclo). */
-export function nextStance(style) {
-    const i = STYLE_STANCES.indexOf(style);
-    return STYLE_STANCES[(i + 1) % STYLE_STANCES.length];
+/** Siguiente postura del abanico; `inverse` la invierte (accion + atras). */
+export function nextStance(stanceId, inverse) {
+    return Boxer.nextStance(stanceId, inverse);
 }
 
 // --- Ventanas de esquive (frames a 60 Hz) --------------------------------
@@ -111,7 +127,26 @@ export class FighterEntity {
         this.model = opts.model;
         this.characterId = opts.characterId || 'BASE';
         this.id = opts.id || this.fighter.name || 'F';
-        this.style = opts.stance || 'IDLE';
+
+        // --- EL SISTEMA DE ESTANCIAS (arquetipo YUGO) ---
+        // La postura activa y su estado de transicion. `dance` es el
+        // "baile de posiciones": la entity va interpolando la
+        // silueta entre dos posturas sin salir de combate.
+        this.stance = {
+            id: (opts.stance && Boxer.STANCES[opts.stance]) ? opts.stance : 'SHELL',
+            time: 0,
+            dance: null,          // { from, to, t, dur }
+            absorb: 0,            // impactos directos que le quedan por absorber
+            target: false,        // fijacion activa (TARGET ACTION)
+            targetTimer: 0,       // reloj del encadenado automatico
+            targetNext: Intent.ATAQUE_PESADO,
+            impactAt: -Infinity,  // momento del ultimo impacto propio
+            impactPoint: null,    // donde golpeo (para dirigir los siguientes)
+            directed: null,       // vector al que dirige la postura
+            usedPress: false,     // la pulsacion actual ya sirvio (comando/target)
+            wasHeld: false,       // ACCION estaba pulsado el frame anterior
+            lastRelease: -Infinity   // para el doble toque del especial
+        };
 
         // --- combate ---
         this.targetLock = false;
@@ -145,6 +180,10 @@ export class FighterEntity {
                 canBreakCombo: () => true,
                 wakeupReady: () => true,
                 isDownAttack: () => false,
+                // El golpe de la postura activa sustituye al del
+                // estado mientras la postura siga viva (ver el getter
+                // `move` de la FSM).
+                stanceAttack: (stateKey) => self.stanceAttackKey(stateKey),
                 now: () => self._time,
                 simFrame: () => (self.fsm ? self.fsm.frame : 0)
             }
@@ -199,7 +238,10 @@ export class FighterEntity {
         // 3. Combos de movimiento (cuadripedia / deslizamiento).
         this._combos(input, world);
 
-        // 4. Ataque aereo (doble arriba + delante/atras + puño/patada).
+        // 4. Estancias de boxeo (rotacion, baile, fijacion) + objetivo.
+        this._stances(dt, input, world, extra);
+
+        // 5. Ataque aereo (doble arriba + delante/atras + puño/patada).
         this._airAttack(input, extra);
 
         // 5. Input final a la FSM.
@@ -416,6 +458,203 @@ export class FighterEntity {
         }
     }
 
+    // =========================================================================
+    // EL SISTEMA DE ESTANCIAS (arquetipo YUGO · core/boxing.js)
+    // -------------------------------------------------------------------------
+    // El boton ACCION es el boton de las posturas. Solo decide el MANDO:
+    // que postura hay, que silueta lleva la pose y que golpe sustituye
+    // al del estado (stanceAttackKey). Las tablas son de boxing.js.
+    // =========================================================================
+
+    /** Doble toque del boton: el ESPECIAL (el golpe de recurso). */
+    static ACTION_DOUBLE_TAP = 0.26;
+
+    /**
+     * La postura manda en el golpe: si la postura activa declara un
+     * golpe propio para ese boton, ese es el que sale. Si el peleador
+     * no lo tiene en su moveset, gana el golpe del estado.
+     * @param {string} stateKey  clave de ataque del estado (ATAQUE_LIGERO...)
+     */
+    stanceAttackKey(stateKey) {
+        const S = this.stance;
+        if (!S || !S.id) return null;
+        const key = Boxer.stanceMove(S.id, stateKey);
+        if (!key || key === stateKey) return null;
+        return getMoves(this.characterId)[key] ? key : null;
+    }
+
+    /** Adopta una postura de golpe (sin transicion). */
+    _adopt(id) {
+        const S = this.stance;
+        S.id = id;
+        S.dance = null;
+        S.time = 0;
+        S.absorb = Boxer.stanceAbsorb(id);   // recarga la absorcion
+        S.directed = null;
+    }
+
+    /** Empieza una transicion fluida (baile) pasando por `path`. */
+    _startDance(path, dur) {
+        if (!path || !path.length) return;
+        this.stance.dance = {
+            path: [this.stance.id, ...path],
+            t: 0,
+            dur: dur || Boxer.DANCE_DURATION
+        };
+    }
+
+    /** La fijacion post-golpe: los siguientes golpes van al impacto. */
+    _startTarget() {
+        const S = this.stance;
+        S.target = true;
+        S.targetTimer = Boxer.TARGET_CHAIN_STEP * 0.35;   // el primero sale ya
+        S.targetNext = Intent.ATAQUE_PESADO;
+        this.targetLock = true;
+    }
+
+    /** ¿Puede actuar ahora mismo (para el encadenado automatico)? */
+    _canAct() {
+        return this.fsm.state.control.canAct && !this._combatLocked();
+    }
+
+    /** La postura que "apunta" hacia este vector (mantenimiento). */
+    _stanceForVector(x, z) {
+        // Hacia delante: Lead (el jab al frente). Hacia atras o de lado:
+        // Shell (compacta, se protege). Hacia abajo/diagonal baja: Relax.
+        if (z > 0.4) return 'LEAD';
+        if (z < -0.4) return 'SHELL';
+        if (Math.abs(x) > 0.5) return 'SHELL';
+        return 'RELAX';
+    }
+
+    /** Mi golpe conecto: se apunta donde y cuando (para la fijacion). */
+    onHitLanded(move, world) {
+        const S = this.stance;
+        S.impactAt = this._time;
+        const o = world && world.opponentOf ? world.opponentOf(this) : null;
+        S.impactPoint = o
+            ? { x: o.fighter.x, z: o.fighter.z }
+            : (move && move.hitbox ? { x: this.fighter.x, z: this.fighter.z + 1 } : null);
+    }
+
+    /**
+     * El motor de las posturas. Corre en cada frame y devuelve en
+     * `extra` los intents que el jugador ha pedido (el especial del
+     * doble toque, el encadenado de la fijacion).
+     */
+    _stances(dt, input, world, extra) {
+        const S = this.stance;
+        S.time += dt;
+
+        // --- el baile sigue su curso --------------------------------
+        if (S.dance) {
+            S.dance.t += dt;
+            if (S.dance.t >= S.dance.dur) {
+                const path = S.dance.path;
+                S.id = path[path.length - 1];
+                S.dance = null;
+                S.absorb = Boxer.stanceAbsorb(S.id);
+            }
+        }
+
+        // --- pulsacion de ACCION: comando de postura ------------------
+        if (input.actionEdge) {
+            S.usedPress = false;
+            const cmd = Boxer.commandStance(input, true);
+            if (cmd) {
+                this._adopt(cmd);            // abajo+delante, guardia, ...
+                S.usedPress = true;
+                return;
+            }
+            // Fijacion post-golpe: si conecto hace nada, ACCION fija.
+            if (S.impactPoint && this._time - S.impactAt <= Boxer.TARGET_WINDOW) {
+                this._startTarget();
+                S.usedPress = true;
+                return;
+            }
+        }
+
+        // --- cancelacion del baile con GUARDIA -----------------------
+        if (S.dance && input.pressed[Intent.GUARDIA]) {
+            S.id = S.dance.path[0];          // vuelve a la postura inicial
+            S.dance = null;
+            S.absorb = Boxer.stanceAbsorb(S.id);
+            return;
+        }
+
+        // --- tilt a una direccional: el "baile de posiciones" --------
+        if (input.actionHeld && input.dirEdge && !S.target) {
+            const pair = Boxer.dancePair(input.dirEdge);
+            this._startDance([pair[0], pair[1]]);
+            return;
+        }
+
+        // --- mantenimiento: adoptar y dirigir la postura -------------
+        if (input.actionHeld && input.moveMag > 0.08 && !S.dance && !S.target) {
+            this._adopt(this._stanceForVector(input.moveX, input.moveZ));
+            S.directed = { x: input.moveX, z: input.moveZ };
+            return;
+        }
+
+        // --- encadenado automatico (TARGET ACTION) -------------------
+        if (S.target) {
+            S.targetTimer -= dt;
+            if (S.targetTimer <= 0 && this._canAct() && !S.dance) {
+                extra.pressed[S.targetNext] = true;
+                // Alterna golpe pesado y ligero: la "rafaga" al punto.
+                S.targetNext = S.targetNext === Intent.ATAQUE_PESADO
+                    ? Intent.ATAQUE_LIGERO : Intent.ATAQUE_PESADO;
+                S.targetTimer = Boxer.TARGET_CHAIN_STEP;
+            }
+        }
+
+        // --- soltar ACCION: rotar la postura, o el ESPECIAL si es
+        //     doble toque (el golpe de recurso del peleador) --------
+        if (!input.actionHeld && S.wasHeld) {
+            if (!S.usedPress && !input.consumedByProp) {
+                if (this._time - S.lastRelease <= FighterEntity.ACTION_DOUBLE_TAP) {
+                    extra.pressed[Intent.ATAQUE_ESPECIAL] = true;
+                } else {
+                    // Rotacion simple; con atras, invertida.
+                    this._startDance([nextStance(S.id, !!input.back)]);
+                }
+                S.lastRelease = this._time;
+            }
+            S.target = false;
+            this.targetLock = false;
+        }
+        S.wasHeld = !!input.actionHeld;
+    }
+
+    /**
+     * La silueta que lleva la pose: la de la postura activa, o la
+     * que resulta de interpolar el baile en curso.
+     */
+    stanceSilhouette() {
+        const S = this.stance;
+        const def = Boxer.STANCES[S.id];
+        if (!def) return null;
+        if (!S.dance) return { silhouette: def.silhouette, arms: def.arms };
+
+        const path = S.dance.path;
+        const segs = Math.max(1, path.length - 1);
+        const k = Math.min(0.999, S.dance.t / S.dance.dur) * segs;
+        const i = Math.floor(k);
+        const u = k - i;
+        const a = (Boxer.STANCES[path[i]] || def);
+        const b = (Boxer.STANCES[path[i + 1]] || a);
+        const sa = a.silhouette;
+        const sb = b.silhouette;
+        const silhouette = {
+            spread: sa.spread + (sb.spread - sa.spread) * u,
+            lead: sa.lead + (sb.lead - sa.lead) * u,
+            lean: sa.lean + (sb.lean - sa.lean) * u,
+            guard: sa.guard + (sb.guard - sa.guard) * u,
+            crouch: sa.crouch + (sb.crouch - sa.crouch) * u
+        };
+        return { silhouette, arms: u < 0.5 ? a.arms : b.arms };
+    }
+
     /**
      * Ataque aereo: doble arriba + (delante | atras) + puño/patada.
      * Se pide el SALTO ahora; el golpe se dispara cuando el cuerpo
@@ -523,6 +762,15 @@ export class FighterEntity {
             this._justAttacked = false;
             return;
         }
+        // Al encarar al rival: si hay fijacion (TARGET ACTION), los
+        // siguientes golpes van al punto donde conecto el ultimo.
+        if (this.stance.target && this.stance.impactPoint) {
+            f.facing = Math.atan2(
+                this.stance.impactPoint.x - f.x,
+                this.stance.impactPoint.z - f.z
+            );
+            return;
+        }
         // Golpe, caida, agarre, guardia: la animacion manda (LOCK_ROTATION).
         if (this._combatLocked()) return;
 
@@ -539,8 +787,11 @@ export class FighterEntity {
             ? Math.hypot(o.fighter.x - this.fighter.x, o.fighter.z - this.fighter.z)
             : 1.5;
         const opts = {
-            style: this.style, forward: 1, dist,
-            time: this._time, loco: this.loco.state
+            style: 'IDLE', forward: 1, dist,
+            time: this._time, loco: this.loco.state,
+            // La postura activa (arquetipo YUGO) o la silueta
+            // interpolada del baile en curso.
+            stance: this.stanceSilhouette()
         };
 
         // Estados de combate (golpe, impacto, guardia, suelo, aire,
@@ -604,6 +855,20 @@ export class FighterEntity {
      */
     defend(move, attacker, world) {
         const evading = this.evadeStateFor(move);
+
+        // --- ESTANCIAS DE BOXEO (arquetipo YUGO) ---------------------
+        // ABSORB: la postura se come uno o dos impactos DIRECTOS con
+        // un brazo mientras la otra mano responde (su moveset ya es
+        // la respuesta). Los golpes FUERTES rompen la absorcion.
+        if (this.stance.absorb > 0 && move.hitLevel !== SPF.HitLevel.FUERTE) {
+            this.stance.absorb -= 1;
+            return { hit: false, blocked: true, how: 'ABSORB' };
+        }
+        // CATCH: la postura ATRAPA patadas bajas del rival.
+        if (Boxer.catchesLowKicks(this.stance.id) &&
+            move.height === 'BAJO') {
+            return { hit: false, dodged: true, how: 'ATRAPADA' };
+        }
 
         // Guardia: la altura de la guardia cubre la del golpe.
         if (this.fsm.state.tag === 'GUARDIA' && !evading) {

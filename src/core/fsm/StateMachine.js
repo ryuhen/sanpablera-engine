@@ -564,7 +564,13 @@ export class StateMachine {
     get move() {
         const key = this.state.attack;
         if (!key) return null;
-        return getMove(this.api.characterId, key) || null;
+        // EL MOVESET DE LA POSTURA MANDA (core/boxing.js): si el
+        // arquetipo tiene una postura activa con golpe propio para
+        // este boton, ese es el golpe. Mismo estado, distinta
+        // lectura: por eso las estancias se resuelven AQUI y no
+        // con una tabla de transiciones nueva.
+        const stanceKey = this.api.stanceAttack ? this.api.stanceAttack(key) : null;
+        return getMove(this.api.characterId, stanceKey || key) || null;
     }
 
     // =========================================================================

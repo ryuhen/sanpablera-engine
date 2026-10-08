@@ -20,7 +20,7 @@ sentirse; el código se juzga contra esto.
     1. Ataque 1 (Ligero / Rápido).
     2. Ataque 2 (Fuerte / Pesado).
     3. Guardia / Bloqueo.
-    4. Botón de Acción / Interacción especial.
+    4. Botón de Acción / Interacción especial. *(En el arquetipo YUGO es además el botón de las posturas de boxeo: ver sección 13.)*
 
 ---
 
@@ -61,7 +61,7 @@ El motor soporta opciones ofensivas y defensivas en todo momento: de pie, agacha
 
 **Variante visual:** las acciones de posición normal, agachado y salto cuentan con versiones explícitas diferenciadas según si el peleador da la **espalda a la cámara** o tiene el **frente hacia la cámara**.
 
-**Cómo se escribe un moveset (el ejemplo vivo es Pedro Pérez, `Src/core/fsm/states/Movesets.js`):** cada peleador viene de un **estilo base** y, por la calle de Sanpablera, lo adapta con formas variadas y mucha movilidad. Pedro empieza como **boxeador** y le crecen las capas: **patadas** (savate del puerto) → **pelea en el suelo** (derribo, sumisión) → **arma** (la botella). Un moveset son 4 piezas: frame data (`defineMove`), registro por claves (`registerMoves`: una clave base se SUSTITUYE, una clave nueva se SUMA), estados ATTACKING propios (`defineState`), y alcance (`Transitions.js`: reglas con `hasMove` que solo compiten si el moveset define el golpe).
+**Cómo se escribe un moveset (el ejemplo vivo es Pedro Pérez, `src/core/fsm/states/Movesets.js`):** cada peleador viene de un **estilo base** (un arquetipo, ver sección 11) y, por la calle de Sanpablera, lo adapta con formas variadas y mucha movilidad. Pedro empieza como **boxeador** y le crecen las capas: **patadas** (savate del puerto) → **pelea en el suelo** (derribo, sumisión) → **arma** (la botella), más el **sistema de estancias** del arquetipo YUGO (sección 13). Un moveset son 4 piezas: frame data (`defineMove`), registro por claves (`registerMoves`: una clave base se SUSTITUYE, una clave nueva se SUMA), estados ATTACKING propios (`defineState`), y alcance (`Transitions.js`: reglas con `hasMove` que solo compiten si el moveset define el golpe).
 
 ---
 
@@ -99,7 +99,77 @@ La FSM gestiona de forma estricta los estados complejos del combate:
 ---
 
 ## 10. Arquitectura (cómo está organizado el código)
-- **Puro y testeable:** toda la lógica (FSM, frame data, transiciones, rig numérico, input) vive en `Src/core/` **sin importar Babylon**: se testea en Node (`npm test`).
-- **Babylon solo en `Src/render/` y `Src/core/Engine.js`:** el motor 3D es la última capa.
-- **Cableado:** UI táctil (`Src/ui/`) → `InputMapper` (d-pad + 4 botones → intents de la FSM, doble toque = dash, acorde ligero+pesado = técnica) → `FighterEntity` (locomoción, esquives, poses) → FSM (combate) + `FighterRig` (poses) → `CharacterModel` → Babylon.
+- **Puro y testeable:** toda la lógica (FSM, frame data, transiciones, rig numérico, input) vive en `src/core/` **sin importar Babylon**: se testea en Node (`npm test`).
+- **Babylon solo en `src/render/` y `src/core/Engine.js`:** el motor 3D es la última capa.
+- **Cableado:** UI táctil (`src/ui/`) → `InputMapper` (d-pad + 4 botones → intents de la FSM, doble toque = dash, acorde ligero+pesado = técnica) → `FighterEntity` (locomoción, esquives, estancias, poses) → FSM (combate) + `FighterRig` (poses) → `CharacterModel` → Babylon.
 - **Datos, no ifs:** la tabla de transiciones (`Transitions.js`) es la única que decide "de aquí a allá"; depurar es `Transitions.explain()`.
+
+---
+
+## 11. Los arquetipos base (plantilla internacional segura)
+
+Todo peleador —del juego o del jugador— **viene de uno de estos tres**. Nombres y conceptos **100 % libres de copyright**: sin marcas y sin nombres de franquicias. Son *estilos*, no personajes: los peleadores tienen su propio nombre (Pedro Pérez, John Doe...).
+Módulo: `src/core/archetypes.js`. Cada peleador del roster declara su `archetype`.
+
+| Arquetipo | Nombre | Concepto | Base desarmada | Le crece en la calle |
+|---|---|---|---|---|
+| **YUGO** | El Boxeador | Combate ágil y rápido de puños. | Boxeo | Patadas, suelo, sumisión, arma |
+| **MONTE** | El Peleador Salvaje | Movilidad acrobática, saltos múltiples y posturas cuadrúpedas. *(el estilo "Tarzán/Monte": el de la selva, registrado con el nombre libre)* | Acrobacia de monte | Saltos múltiples, cuadrupedia, golpes de aire |
+| **MUSASHI** | El Vagabundo Marcial | Base desarmada de Karate, Aikido y Judo, con capacidad de **convertir cualquier objeto del entorno (palo, vara, herramienta) en un estilo de espada letal**: el *Kenjutsu Improvisado*. | Karate · Aikido · Judo | Kenjutsu improvisado, proyecciones, sumisiones |
+
+**Reparto actual:** YUGO → Pedro Pérez, María González · MONTE → José López, Ana Torres · MUSASHI → Juan García, John Doe, Jane Doe, Carlos Ruiz · el peleador del jugador hereda el de su estilo base.
+
+---
+
+## 12. Escalada de combate por fases (roadmap de campaña)
+
+Las **reglas del combate cambian según la fase activa**, y se programan **de forma modular**: son datos (`src/core/phases.js`), no código. Añadir una fase o cambiar una regla es editar una tabla.
+
+| Fase | Nombre | Ábitro | Suelo | Armas | Marcas |
+|---|---|---|---|---|---|
+| **1** | **Combate Deportivo** (reglamentado) | **Sí.** Si un peleador cae hay una ventana estricta de **1 segundo** para rematar o transicionar a suelo; pasado ese tiempo el árbitro detiene el combate y lo reinicia a distancia de golpe. | G&P no libre (lo para el árbitro) | Ninguna | Jueces: premian golpes limpios (cara/torso), contraataques y proyecciones; penalizan con **tarjetas** los golpes ilegales o prohibidos (espalda, piernas, piquetes de ojos, testículos, cuello, bloqueos inquebrantables ilegales). |
+| **2** | **Combate de Barrio** (callejero) | **No: desaparece el árbitro.** | **Libre y sin límite de tiempo** | Ninguna | Estrictamente a KO. |
+| **3** | **Combate Táctico Urbano** | No | Libre | Elementos del entorno y armas ocultas/portátiles: cuchillos, botellas rotas, palos, cadenas, correas y prendas | — |
+| **4** | **Duelos Ilegales** (el clímax) | No | Libre | **De pleno uso**, con todo lo anterior | **Sistema táctico de desarme / apropiación** del arma del rival en pleno cuerpo a cuerpo. |
+
+---
+
+## 13. El sistema de estancias de boxeo (arquetipo YUGO)
+
+En vez de una transformación animal, el boxeador tiene un **sistema técnico de posturas (stances) rotativas y dinámicas**, y **cada postura tiene su propio moveset, accesible en cualquier fotograma en que esté activa** (incluso a mitad de una transición).
+Módulo: `src/core/boxing.js` (datos) + la máquina en `FighterEntity._stances` (mando).
+
+### 13.1 Las tres posturas base
+- **SHELL · Peek-a-Boo / Shell** — postura defensiva compacta que protege rostro y torso alto: ideal para **absorber castigo** y contraatacar en cortas distancias.
+- **LEAD · Puño al Frente** — postura estirada y adelantada, enfocada en la **velocidad de jabeo** y el control del espacio frontal.
+- **RELAX · Postura Descansada** — postura baja donde **un puño desciende a la altura de la rodilla**, alterando el perfil del cuerpo y habilitando **entradas angulares**.
+
+### 13.2 Transición y rotación (botón de Acción)
+- **Rotación simple:** ACCION rota secuencialmente entre las posturas (SHELL → LEAD → RELAX → SHELL).
+- **Inversión:** ACCION + **Atrás** invierte el ciclo.
+- **Mantenimiento direccional:** ACCION + una dirección **mantenida** adopta la postura y la **dirige** hacia ese vector espacial.
+- **El "baile de posiciones"** (Flashing Footwork): ACCION + **tilt rápido** a la direccional ejecuta una transición corta y fluida por **dos** posturas; continuar pulsando direcciones antes de que termine **encadena** más saltos a otras dos (la dirección determina el par destino).
+- **Acceso dinámico:** en cualquier fotograma de una pose o transición, el peleador usa el moveset de la postura activa.
+- **Cancelación:** el baile se cancela **al instante con el botón de Guardia**.
+
+### 13.3 Target Action (fijación de objetivo)
+- **Fijación post-ataque:** ACCION **inmediatamente después de que conecte** un golpe dirige de forma automática los siguientes golpes al objetivo.
+- **Consecución:** manteniendo ACCION, el motor **encadena automáticamente** ataques lógicos y consecutivos dirigidos al **punto de impacto anterior**.
+
+### 13.4 Estancias avanzadas por comandos
+- **PRESS · Presión Frontal** (`Abajo+Adelante+Acción`): postura ofensiva especializada en **romper guardias** y disparar secuencias de **rectos y ganchos**.
+- **ABSORB · Absorción y Contraataque** (`Guardia+Acción`): **absorbe uno o dos impactos directos** usando un brazo para la cobertura mientras la otra mano castiga con **jabs rápidos o patadas bajas** de respuesta.
+- **CATCH · Atrapamiento de Patadas Bajas** (`Abajo+Atrás+Guardia+Acción`): **atrapa las patadas bajas** del rival levantando la pierna o el torso para castigar, proyectar o cerrar distancia con un **abrazo táctico**; desde el abrazo, una **ráfaga a las costillas** que culmina en **proyección o derribo**.
+
+### 13.5 El moveset de cada postura (Pedro Pérez, el primer peleador)
+
+| Postura | Ligero (rápido) | Pesado | Especial |
+|---|---|---|---|
+| SHELL | **Corto** (jab mínimo, respuesta mientras absorbe) | **Ascendente** (el ángel: rompe la guardia alta) | Botellazo |
+| LEAD | **Jab largo** (control del espacio frontal) | **Cruzado** (recto de potencia) | Botellazo |
+| RELAX | **Gancho** (entrada angular desde abajo) | **Patada baja** (el arma de las posturas bajas) | Botellazo |
+| PRESS | **Recto** (rompe la guardia baja, abre la secuencia) | **Gancho** | Botellazo |
+| ABSORB | **Corto** | **Patada baja** (respuesta) | Botellazo |
+| CATCH | **Costillazo** (la ráfaga del abrazo) | **Proyección** (el remate) | Botellazo |
+
+Cada golpe tiene su frame data en `src/core/fsm/states/Movesets.js` (capa 1b) y su pose procedural en `FighterRig.js`. El motor lo resuelve en el getter `move` de la FSM: **mismo estado, distinta lectura**.
