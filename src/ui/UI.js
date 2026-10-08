@@ -1,9 +1,26 @@
 import TouchControls from './TouchControls.js';
+import { InputRouter } from './InputRouter.js';
 
 class UI {
   constructor() {
-    this.touchControls = new TouchControls();
+    this.rawTouch = new TouchControls();
+    // El router unifica teclado + mando + tactil y expone el estado con la
+    // misma forma que el motor ya leia (`dpad` y `buttons`).
+    this.router = new InputRouter(this.rawTouch).attach();
     this.initUI();
+  }
+
+  /**
+   * Estado unificado de entrada. El motor lee esto (antes leia directamente
+   * el TouchControls, que solo sabia de raton y dedo).
+   */
+  get touchControls() {
+    return this.router;
+  }
+
+  /** Actualiza teclado y mando. Se llama una vez por frame. */
+  syncInput() {
+    this.router.sync();
   }
 
   initUI() {
@@ -80,31 +97,31 @@ class UI {
       // el estado final es el mismo.
       button.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        this.touchControls.updateDpad(direction, true);
+        this.rawTouch.updateDpad(direction, true);
         button.style.backgroundColor = '#999';
       });
 
       button.addEventListener('touchend', (e) => {
         e.preventDefault();
-        this.touchControls.updateDpad(direction, false);
+        this.rawTouch.updateDpad(direction, false);
         button.style.backgroundColor = '#ccc';
       });
 
       button.addEventListener('pointerdown', (e) => {
         e.preventDefault();
-        this.touchControls.updateDpad(direction, true);
+        this.rawTouch.updateDpad(direction, true);
         button.style.backgroundColor = '#999';
       });
 
       button.addEventListener('pointerup', (e) => {
         e.preventDefault();
-        this.touchControls.updateDpad(direction, false);
+        this.rawTouch.updateDpad(direction, false);
         button.style.backgroundColor = '#ccc';
       });
 
       button.addEventListener('pointercancel', (e) => {
         e.preventDefault();
-        this.touchControls.updateDpad(direction, false);
+        this.rawTouch.updateDpad(direction, false);
         button.style.backgroundColor = '#ccc';
       });
 
@@ -112,7 +129,7 @@ class UI {
         // En raton: salir del boton con el boton pulsado
         // SUELTA (el dedo en movil ya lo hace con pointerup).
         if (e.pointerType === 'mouse' && e.buttons > 0) {
-          this.touchControls.updateDpad(direction, false);
+          this.rawTouch.updateDpad(direction, false);
           button.style.backgroundColor = '#ccc';
         }
       });
@@ -178,37 +195,37 @@ class UI {
       // Touch (movil) y pointer (raton/estilo). Idempotentes.
       button.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        this.touchControls.updateButton(buttonInfo.id, true);
+        this.rawTouch.updateButton(buttonInfo.id, true);
         button.style.backgroundColor = '#999';
       });
 
       button.addEventListener('touchend', (e) => {
         e.preventDefault();
-        this.touchControls.updateButton(buttonInfo.id, false);
+        this.rawTouch.updateButton(buttonInfo.id, false);
         button.style.backgroundColor = '#ccc';
       });
 
       button.addEventListener('pointerdown', (e) => {
         e.preventDefault();
-        this.touchControls.updateButton(buttonInfo.id, true);
+        this.rawTouch.updateButton(buttonInfo.id, true);
         button.style.backgroundColor = '#999';
       });
 
       button.addEventListener('pointerup', (e) => {
         e.preventDefault();
-        this.touchControls.updateButton(buttonInfo.id, false);
+        this.rawTouch.updateButton(buttonInfo.id, false);
         button.style.backgroundColor = '#ccc';
       });
 
       button.addEventListener('pointercancel', (e) => {
         e.preventDefault();
-        this.touchControls.updateButton(buttonInfo.id, false);
+        this.rawTouch.updateButton(buttonInfo.id, false);
         button.style.backgroundColor = '#ccc';
       });
 
       button.addEventListener('pointerleave', (e) => {
         if (e.pointerType === 'mouse' && e.buttons > 0) {
-          this.touchControls.updateButton(buttonInfo.id, false);
+          this.rawTouch.updateButton(buttonInfo.id, false);
           button.style.backgroundColor = '#ccc';
         }
       });
@@ -218,11 +235,11 @@ class UI {
   }
 
   getMovementVector() {
-    return this.touchControls.getMovementVector();
+    return this.rawTouch.getMovementVector();
   }
 
   getActiveButtons() {
-    return this.touchControls.getActiveButtons();
+    return this.rawTouch.getActiveButtons();
   }
 }
 

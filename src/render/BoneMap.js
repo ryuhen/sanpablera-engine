@@ -105,11 +105,15 @@ export const ALIASES = Object.freeze({
     }),
 
     // --- Convenciones genericas (Kenney, Quaternius, Ready Player Me, ...) --
+    // OJO con el orden dentro de cada lista: gana el PRIMER alias que exista
+    // en el modelo. Por eso 'pelvis' va antes que 'root': Quaternius trae las
+    // dos, y 'root' es el nodo raiz del archivo, no la cadera. Con 'root'
+    // primero el rig entero se colgaba de la raiz de la escena.
     GENERIC: Object.freeze({
-        PELVIS: ['Hips', 'hips', 'root', 'pelvis', 'Hip', 'Bip01_Pelvis'],
-        SPINE: ['Spine', 'spine', 'Bip01_Spine'],
-        CHEST: ['Chest', 'chest', 'Spine1', 'Spine2', 'upper_chest', 'Bip01_Spine1', 'Bip01_Spine2'],
-        NECK: ['Neck', 'neck', 'Bip01_Neck'],
+        PELVIS: ['Hips', 'hips', 'pelvis', 'Pelvis', 'Hip', 'Bip01_Pelvis', 'root'],
+        SPINE: ['Spine', 'spine', 'spine_01', 'Bip01_Spine'],
+        CHEST: ['Chest', 'chest', 'spine_03', 'Spine1', 'Spine2', 'upper_chest', 'Bip01_Spine1', 'Bip01_Spine2'],
+        NECK: ['Neck', 'neck', 'neck_01', 'Bip01_Neck'],
         HEAD: ['Head', 'head', 'Bip01_Head'],
         CLAV_L: ['LeftShoulder', 'left_shoulder', 'shoulder.L', 'clavicle_l', 'Bip01_Clavicle_L'],
         UPPERARM_L: ['LeftArm', 'left_arm', 'upperarm_l', 'arm.L', 'lUpperArm', 'Bip01_UpperArm_L'],

@@ -28,6 +28,26 @@ Atribucion requerida por CC BY 4.0:
 
 ---
 
+## characters/quaternius-superhero-male/
+
+| Campo | Valor |
+|---|---|
+| Carpeta | `assets/characters/quaternius-superhero-male/` |
+| Origen | Quaternius · pack "Universal Base Characters" (edicion Standard) |
+| Descarga | `https://quaternius.itch.io/universal-base-characters` (gratis, sin cuenta) |
+| Autoria | Quaternius (c) laulhet@gmail.com |
+| Licencia | **CC0 1.0** (dominio publico) |
+| Uso | Libre en proyectos personales, educativos y comerciales. Sin atribucion obligatoria. |
+
+Ficheros: `Superhero_Male_FullBody.gltf` + `.bin` + 7 texturas PNG. 13k triangulos.
+
+Se corrigieron dos URIs dentro del `.gltf`: el export de Quaternius apunta a
+`T_Hair_1_Normal_png.png` y `T_Eye_Normal_png.png`, ficheros que no vienen en
+el zip (se llaman sin el sufijo `_png`). Sin ese arreglo faltan dos texturas y
+el navegador pide dos 404.
+
+---
+
 ## Modelos que NO se incluyen aqui y por que
 
 - **Xbot / Soldier (three.js examples)**: son Mixamo. Adobe Mixamo deja usarlos
@@ -36,6 +56,5 @@ Atribucion requerida por CC BY 4.0:
   tu a `assets/characters/` (esa carpeta ignora `*.glb.local`, ver
   `.gitignore`) y `BoneMap.js` ya trae los alias de Mixamo:
   `mixamorig:Hips` -> `PELVIS`, `mixamorig:LeftForeArm` -> `FOREARM_L`, etc.
-- **Modelos de Quaternius o Kenney**: son CC0 y se podrian incluir sin
-  problema, pero no hay ninguna descarga directa estable; cuando se metan,
-  `BoneMap.js` tambien trae sus alias (`Hips`, `LeftUpLeg`, `LeftLeg`...).
+- **Kenney y otros CC0**: `BoneMap.js` ya trae sus alias (`Hips`, `LeftUpLeg`,
+  `LeftLeg`...). Cuando se metan, anadir el bloque de creditos aqui arriba.

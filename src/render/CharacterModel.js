@@ -67,11 +67,25 @@ export function readModelBones(root) {
     const byName = new Map();
     const out = [];
 
+    // Un hueso es un nodo SIN geometria PROPIA. Importante: no vale mirar los
+    // descendientes con getChildMeshes(), porque los nodos intermedios que
+    // mete el importador de glTF (__root__, Z_UP, Armature) no tienen malla
+    // propia pero tienen hijos que si, y son parte del esqueleto. Si se les
+    // salta sin bajar, el rig sale VACIO: el personaje se ve de pie (por el
+    // transform que trae el archivo) pero no se le puede animar, y placeFoot
+    // revienta al no encontrar el hueso del pie.
+    const isGeometry = (node) => {
+        if (node.isAnInstance) return true;
+        const vtx = typeof node.getTotalVertices === 'function' ? node.getTotalVertices() : 0;
+        return vtx > 0;
+    };
+
     const walk = (node, parentName) => {
         for (const child of node.getChildren()) {
-            // Los mallas de un .glb son hijos de un hueso, no al reves. Solo se
-            // recorren los nodos que son de tipo hueso (sin geometria).
-            if (!child.getChildMeshes || child.getChildMeshes().length > 0) {
+            if (isGeometry(child)) {
+                // Tiene malla, pero puede esconder huesos debajo (un grupo o un
+                // nodo de anidamiento): se sigue bajando sin registrarlo.
+                walk(child, parentName);
                 continue;
             }
             const name = stripSuffix(child.name);
@@ -121,6 +135,75 @@ function qmulQuat(a, b) {
  * geometria y de escribir poses. El `root` es un TransformNode suelto para poder
  * mover y girar al personaje entero sin tocar ni un solo hueso.
  */
+/**
+ * Caja envolvente de las mallas en el espacio del ARCHIVO, leyendo los
+ * vertices CRUDOS (no la caja del mundo: esa ya trae las rotaciones de los
+ * nodos intermedios, que no son las que necesita el calculo del rig).
+ *
+ * @returns {{min:number[], max:number[], alto:number}} `alto` es la dimension
+ *   mayor del modelo en metros de archivo, que es su altura este o tumbado.
+ */
+export function measureMesh(roots) {
+    const B = globalThis.BABYLON;
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    let any = false;
+
+    for (const root of roots || []) {
+        const meshes = root && root.getChildMeshes ? root.getChildMeshes() : [];
+        for (const mesh of meshes) {
+            if (!mesh.getVerticesData) continue;
+            const pos = mesh.getVerticesData(B.VertexBuffer.PositionKind);
+            if (!pos || pos.length < 3) continue;
+            for (let i = 0; i < pos.length; i += 3) {
+                for (let a = 0; a < 3; a++) {
+                    if (pos[i + a] < min[a]) min[a] = pos[i + a];
+                    if (pos[i + a] > max[a]) max[a] = pos[i + a];
+                }
+            }
+            any = true;
+        }
+    }
+
+    if (!any || !isFinite(min[0])) return { min: [0, 0, 0], max: [0, 0, 0], alto: 1 };
+    const ext = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+    // La altura es el eje mayor entre Y y Z, nunca X: en T-pose la extension
+    // en X es la envergadura de los brazos (1,86 m en el modelo de Quaternius)
+    // y tomarla como alturaeria un personaje de 1,86 m en vez de 1,82.
+    return { min, max, ext, alto: Math.max(ext[1], ext[2]) };
+}
+
+/**
+ * Elige la correccion de eje probando las dos y quedandose con la que deja la
+ * cadena de huesos COHERENTE: cabeza arriba, pelvis en medio, pies abajo.
+ *
+ * POR QUE HAY QUE PROBAR Y NO ADIVINAR
+ *   Los .glb no guarantizan nada y los hay de las dos clases. Peor: el eje de
+ *   los HUESOS puede no ser el de la MALLA. El mannequin de Khronos tiene los
+ *   dos en Z, pero el modelo de Quaternius tiene la malla en Y (1,82 m en Y) y
+ *   los huesos en Z. Mirar solo los vertices da 'Y_UP' y el rig sale con la
+ *   cabeza a -0,005 y los pies a +0,088: la cadena al reves, y el peleador
+ *   aparece arrodillado. Por eso se decide con el rig, que es quien lo usa.
+ */
+function pickRootFix(boneMap, bones) {
+    const coherente = (rig) => {
+        const y = (c) => (rig.restWorld[c] ? rig.restWorld[c].p[1] : null);
+        const cabeza = y('HEAD'), pelvis = y('PELVIS');
+        const pies = [y('FOOT_L'), y('FOOT_R')].filter((v) => v !== null);
+        if (cabeza === null || pelvis === null || !pies.length) return false;
+        return cabeza > pelvis && Math.max(...pies) < pelvis;
+    };
+
+    // Se prueban las dos y se devuelven el rig ganador, que ademas sirve como
+    // sonda para la escala: asi no se construye dos veces.
+    const z = buildRig(boneMap, bones, { scale: 1, rootFix: 'Z_UP' });
+    if (coherente(z)) return { rootFix: 'Z_UP', probe: z };
+    const y = buildRig(boneMap, bones, { scale: 1, rootFix: 'Y_UP' });
+    if (coherente(y)) return { rootFix: 'Y_UP', probe: y };
+    // Ninguna es coherente: se entrega el rig vacio, que es lo que habia antes.
+    return { rootFix: 'Y_UP', probe: y };
+}
+
 export class CharacterModel {
     /**
      * @param {object} opts
@@ -128,7 +211,8 @@ export class CharacterModel {
      * @param {object} opts.scene      BABYLON.Scene
      * @param {object} opts.roots      { glb: BABYLON.TransformNode } nodos ya cargados
      * @param {number} [opts.height]   alto deseado en metros
-     * @param {string} [opts.rootFix]  'Z_UP' si el archivo esta tumbado
+     * @param {string} [opts.rootFix]  'Z_UP' / 'Y_UP'. Si se omite, se DETECTA
+     *                                   midiendo el modelo (ver detectUpAxis)
      */
     constructor(opts) {
         this.name = opts.name || 'fighter';
@@ -171,10 +255,32 @@ export class CharacterModel {
         // (que es lo que parece el parametro) inflaria el personaje a 2,6 m.
         // Por eso se mide primero con factor 1 y se reconstruye ya escalado:
         // son 19 huesos, da igual hacerlo dos veces.
-        const rootFix = opts.rootFix === undefined ? 'Z_UP' : opts.rootFix;
+        // El eje se DECIDE con el rig (ver pickRootFix): hay archivos con los
+        // huesos tumbados y de pie, y el eje de los huesos no tiene por que ser
+        // el de la malla. Si el llamante lo impone, se respeta.
+        const rootsHere = this.sources.length ? this.sources : (opts.roots || []);
+        let rootFix, probe;
+        if (opts.rootFix !== undefined && opts.rootFix !== null) {
+            rootFix = opts.rootFix;
+            probe = buildRig(this.boneMap, bones, { scale: 1, rootFix });
+        } else {
+            const elegido = pickRootFix(this.boneMap, bones);
+            rootFix = elegido.rootFix;
+            probe = elegido.probe;
+        }
+        this.rootFix = rootFix;
+
+        // La escala sale de la MALLA, no del rig. El rig mide la altura entre
+        // huesos (1,49 m en el modelo de Quaternius) y la malla 1,82 m: son
+        // cosas distintas, y lo que tiene que medir 1,80 m es el personaje que
+        // se ve. Con la escala de la malla el esqueleto queda en 1,48 m, que es
+        // justo lo que mide un esqueleto humano de 1,80 m, y el IK encaja.
+        // Para el mannequin de Khronos los dos valores coinciden (1,45 m) y la
+        // escala sale 1,2414, igual que antes de este cambio.
         const target = opts.height || CFG.CHARACTER_HEIGHT;
-        const probe = buildRig(this.boneMap, bones, { scale: 1, rootFix });
-        this.modelScale = target / probe.measuredHeight;
+        const altoMalla = measureMesh(rootsHere).alto;
+        this.meshAlto = altoMalla;
+        this.modelScale = target / (altoMalla > 1e-6 ? altoMalla : probe.measuredHeight);
         this.rig = buildRig(this.boneMap, bones, { scale: this.modelScale, rootFix });
 
         // El rig ya mide en METROS REALES (todo el core/cine trabaja asi), pero
@@ -255,7 +361,10 @@ export class CharacterModel {
 
     /** Altura real del personaje en metros de escena. */
     get height() {
-        return this.rig.measuredHeight * this.modelScale;
+        // meshAlto viene en metros de archivo y modelScale ya lleva la
+        // conversion; multiplicar tambien por rig.measuredHeight (que va en
+        // espacio de personaje) contaba la escala dos veces.
+        return this.meshAlto * this.modelScale;
     }
 
     dispose() {
@@ -280,7 +389,59 @@ function qRotateVecCached(q, v) {
 }
 
 /**
+ * De una lista de nodos, saca las RAICES: los que se quedan sin padre al
+ * subir por la jerarquia. Los huesos (TransformNode) tambien cuentan: son
+ * justo los que necesita el rig.
+ */
+function topLevelRoots(nodes) {
+    const out = [];
+    const seen = new Set();
+    for (const m of nodes) {
+        if (seen.has(m)) continue;
+        let top = m;
+        while (top.parent) top = top.parent;
+        if (seen.has(top)) continue;
+        seen.add(top);
+        out.push(top);
+    }
+    return out;
+}
+
+/**
+ * Nodos de la escena SIN padre antes y despues de addAllToScene(): asi se
+ * sabe que ha trayado el .glb. Hace falta porque `container.meshes` solo trae
+ * Mesh y el esqueleto del mannequin son TransformNodes; usarla dejaba el rig
+ * vacio y reventaba en el primer frame.
+ */
+function newRootNodes(scene, before) {
+    const known = new Set(before);
+    return topLevelRoots(scene.rootNodes.filter(n => !known.has(n)));
+}
+
+/**
+ * Construye el CharacterModel a partir de las raices ya en la escena.
+ */
+function buildFrom(scene, roots, opts) {
+    return new CharacterModel({
+        name: opts.name || 'fighter',
+        scene,
+        roots,
+        height: opts.height,
+        rootFix: opts.rootFix,
+        debugDraw: opts.debugDraw
+    });
+}
+
+/**
  * Carga un .glb y devuelve un CharacterModel.
+ *
+ * POR QUE UN ASSET CONTAINER Y NO SceneLoader.ImportMesh
+ *   ImportMesh cachea por URL: pedir dos veces el MISMO .glb en la MISMA
+ *   escena devuelve los MISMOS nodos. Como el CharacterModel cuelga esos
+ *   nodos de su propia raiz (setParent), el segundo peleador se lleva por
+ *   delante los meshes del primero y en pantalla solo aparece UNO.
+ *   LoadAssetContainer construye un arbol NUEVO en cada llamada, con su
+ *   propio esqueleto, que es justo lo que necesita un combate a dos.
  *
  * @returns {Promise<CharacterModel>}
  */
@@ -291,37 +452,17 @@ export function loadCharacterModel(scene, url, opts = {}) {
             reject(new Error('CharacterModel: BABYLON no esta cargado'));
             return;
         }
-        B.SceneLoader.ImportMesh(null, '', url, undefined,
-            (result) => {
-                try {
-                    const mql = result.meshes.filter((m) => !m.name.startsWith('Z_UP'));
-                    const roots = [];
-                    const seen = new Set();
-                    for (const m of mql) {
-                        // Solo los nodos de jerarquia (sin padre) se mueven; las
-                        // instancias se cuelgan de su padre y se mueven solas.
-                        if (m.parent && m.parent.getTotalVertices && m.parent.getTotalVertices() > 0) continue;
-                        let top = m;
-                        while (top.parent) top = top.parent;
-                        if (seen.has(top)) continue;
-                        seen.add(top);
-                        roots.push(top);
-                    }
-                    resolve(new CharacterModel({
-                        name: opts.name || 'fighter',
-                        scene,
-                        roots,
-                        height: opts.height,
-                        rootFix: opts.rootFix,
-                        debugDraw: opts.debugDraw
-                    }));
-                } catch (err) {
-                    reject(err);
-                }
-            },
-            undefined,
-            (msg, ex) => reject(ex || new Error(String(msg)))
-        );
+        if (typeof B.LoadAssetContainerAsync !== 'function') {
+            reject(new Error('CharacterModel: LoadAssetContainerAsync no disponible'));
+            return;
+        }
+        const before = scene.rootNodes.slice();
+        B.LoadAssetContainerAsync(url, scene).then((container) => {
+            // addAllToScene() es lo que cuelga los nodos en la escena; sin esto
+            // el esqueleto no se registra y las poses no deforman la malla.
+            container.addAllToScene();
+            resolve(buildFrom(scene, newRootNodes(scene, before), opts));
+        }).catch(reject);
     });
 }
 

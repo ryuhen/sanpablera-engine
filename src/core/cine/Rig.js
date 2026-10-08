@@ -232,7 +232,9 @@ export function buildRig(boneMap, modelBones, opts = {}) {
 // ===========================================================================
 
 function resolveRootFix(rootFix) {
-    if (!rootFix) return qIdentity();
+    // Sin correccion, o con 'Y_UP' explicito (que es el estandar de glTF).
+    // Ojo: cualquier otro string cae en qnorm() y sale NaN.
+    if (!rootFix || rootFix === 'Y_UP') return qIdentity();
     if (rootFix === 'Z_UP') {
         // (x, y, z) -> (x, z, -y): el archivo esta en Z arriba y el motor en
         // Y arriba. Son -90 grados sobre X, NO +90: con el signo equivocado el

@@ -36,6 +36,7 @@
  */
 
 import UI from '../ui/UI.js';
+import { ControlsScreen } from '../ui/ControlsScreen.js';
 import HUD from '../ui/HUD.js';
 import LoadingScreen from '../ui/LoadingScreen.js';
 import SelectScreen from '../ui/SelectScreen.js';
@@ -44,18 +45,41 @@ import { loadCharacterModel } from '../render/CharacterModel.js';
 import { InputMapper } from './entities/InputMapper.js';
 import FighterEntity, { nextStance } from './entities/FighterEntity.js';
 import { StaminaGauge } from './combat/Stamina.js';
-import { Intent } from './fsm/Constants.js';
+import SPF from './fsm/Constants.js';
 import { fullRoster } from './roster.js';
 import { STAGES } from './stages.js';
 
-const MODEL_URL = './assets/characters/mannequin.glb';
-// Las dos esquinas del ring. P1 a la izquierda mirando al centro, P2 a la
-// derecha mirando al centro. Quien ocupa cada esquina se elige en la pantalla
-// de seleccion (SelectScreen), no aqui.
+// Constants.js expone el namespace SPF como export por defecto (no hay
+// exports con nombre), asi que Intent se saca de ahi.
+const { Intent } = SPF;
+
+// Modelo del peleador. Se puede cambiar por ?modelo=<ruta> en la URL para
+// probar otro sin tocar el codigo (ver ASSETS.md).
+const MODEL_URL = (() => {
+    const alt = new URLSearchParams(location.search).get('modelo');
+    return alt ? './' + alt.replace(/^\.?\//, '') : './assets/characters/mannequin.glb';
+})();
+// Las dos esquinas del ring. P1 a un lado, P2 al opuesto, y LOS DOS miran al
+// rival. Quien ocupa cada esquina se elige en la pantalla de seleccion
+// (SelectScreen), no aqui.
+//
+// OJO CON EL FACING: se calcula, no se escribe a mano. Las esquinas estan en
+// diagonal, asi que "facing: 0" (que apunta a +Z) miraba JUSTO HACIA EL LADO
+// CONTRARIO del rival y todos los golpes salian de espaldas: no conectaba nada
+// y no habia forma de que el combate empezara. En un juego de pelea los dos
+// tienen que estar mirandose.
 const FIGHTER_CORNERS = [
-    { name: 'P1', x: -0.55, z: 0.45, facing: 0 },
-    { name: 'P2', x: 0.55, z: -0.45, facing: Math.PI }
+    { name: 'P1', x: -0.55, z: 0.45 },
+    { name: 'P2', x: 0.55, z: -0.45 }
 ];
+
+/**
+ * Giro sobre Y (rad) para mirar de (x,z) hacia (tx,tz).
+ * El motor usa la convencion (sin f, cos f) = direccion de avance: +f mira a +Z.
+ */
+function facingToward(x, z, tx, tz) {
+    return Math.atan2(tx - x, tz - z);
+}
 
 // Dentro del ring: los peleadores no salen de este radio (suelo de 3,1 m).
 const RING_LIMIT = 2.8;
@@ -177,6 +201,9 @@ function makePunchBag(scene_) {
 
     const pivot = new B.TransformNode('bagPivot', scene_);
     pivot.position = anchor;
+    // RotationAxisToRef escribe DENTRO del quaternion que se le pasa: si no
+    // existe, el primer update() del pendulo revienta con "_w de null".
+    pivot.rotationQuaternion = new B.Quaternion(0, 0, 0, 1);
 
     const chain = B.MeshBuilder.CreateCylinder('bagChain', { diameter: 0.02, height: LEN }, scene_);
     chain.parent = pivot;
@@ -255,6 +282,7 @@ function makePunchBag(scene_) {
  */
 function makeFighter(slot, side) {
     const corner = FIGHTER_CORNERS[side];
+    const rival = FIGHTER_CORNERS[side === 0 ? 1 : 0];
     return {
         name: corner.name,
         displayName: slot.name,
@@ -262,7 +290,9 @@ function makeFighter(slot, side) {
         color: slot.rgb,
         x: corner.x,
         z: corner.z,
-        facing: corner.facing,
+        // Mira al rival, no a un eje fijo: es lo unico que hace que los
+        // golpes salgan hacia delante en vez de de espaldas.
+        facing: facingToward(corner.x, corner.z, rival.x, rival.z),
         // Estado de combate del peleador. El HUD lo lee cada frame; la
         // FighterEntity lo modifica al ligar el golpe.
         health: 100,
@@ -561,6 +591,24 @@ async function boot() {
         }))
     });
 
+    // --- Atajo al menu de controles ---------------------------------------
+    // F1 abre el configurador de teclado y mando. Mientras esta abierto el
+    // juego queda congelado (el router desactiva el teclado), asi que no hace
+    // falta pausar la escena a mano.
+    let controlsOpen = false;
+    window.addEventListener('keydown', (e) => {
+        if (e.code !== 'F1' || controlsOpen) return;
+        e.preventDefault();
+        controlsOpen = true;
+        ui.router.releaseAll();
+        inputMapper.reset();
+        new ControlsScreen(ui.router).open().then(() => {
+            controlsOpen = false;
+            ui.router.releaseTouch();
+            inputMapper.reset();
+        });
+    });
+
     // --- Bucle ------------------------------------------------------------
     engine.runRenderLoop(render);
     window.addEventListener('resize', () => engine.resize());
@@ -616,6 +664,9 @@ function render() {
         const d = Math.hypot(dx, dz) || 1;
         toOpp = { x: dx / d, z: dz / d };
     }
+    // Teclado + mando + tactil se unifican aqui, una vez por frame, para que
+    // el InputMapper siga leyendo un unico objeto de estado.
+    ui.syncInput();
     const input = inputMapper.snapshot(ui.touchControls, cam, toOpp);
     inputMapper.tick(dt);
 
@@ -654,6 +705,10 @@ if (document.readyState === 'loading') {
 
 // Para depurar desde la consola del navegador.
 window.SANPABLERA = { engine, scene, camera, fighters, entities, world, inputMapper, loading, ground, hud };
+
+// El router se expone aparte porque `ui` todavia es null aqui (se crea al
+// final de boot). Sirve para inspeccionar que tecla se ha pulsado:
+window.SANPABLERA.getRouter = () => (ui ? ui.router : null);
 
 // Helpers de debug: probar barras y golpes en tiempo real sin esperar
 // al input tactil.
