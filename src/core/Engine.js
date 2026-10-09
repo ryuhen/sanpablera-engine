@@ -38,6 +38,7 @@
 import UI from '../ui/UI.js';
 import { ControlsScreen } from '../ui/ControlsScreen.js';
 import { resolveClash } from './clinch.js';
+import { makeLocoState, readLoco, LOCO, LOCO_TABLE } from './locomotion.js';
 import HUD from '../ui/HUD.js';
 import LoadingScreen from '../ui/LoadingScreen.js';
 import SelectScreen from '../ui/SelectScreen.js';
@@ -359,6 +360,14 @@ const entities = [];
 
 /** Traductor de input: UI tactil -> input de la FSM + detecciones. */
 const inputMapper = new InputMapper();
+
+/**
+ * Memoria de la pulsacion del boton de mover, para distinguir un TOQUE (un
+ * paso) de mantenerlo (caminata o carrera). Vive aqui porque es estado del
+ * motor, no del router: el router solo sabe que el boton esta pulsado.
+ */
+const locoState = makeLocoState();
+let locoWasDown = false;
 
 /**
  * El MUNDO: lo que las entidades y las hitboxes necesitan saber.
@@ -775,6 +784,36 @@ function postureOf(entity) {
 }
 
 /**
+ * LECTURA DEL BOTON DE MOVER: paso por toque frente a pulsacion mantenida.
+ *
+ * Es la pieza que hace que tocar y mantener se sientan distintos (un paso
+ * corto frente a andar o correr), que es de lo que habla core/locomotion.js.
+ * Solo mira el EJE del dpad; los botones de golpe van por otro lado.
+ *
+ * @param {number} time  reloj del juego
+ * @returns {object} { kind, dirX, dirZ }
+ */
+function readMoveInput(time) {
+    if (!ui) return { kind: LOCO.IDLE, dirX: 0, dirZ: 0 };
+    const d = ui.touchControls.dpad;
+
+    const dirX = (d.right ? 1 : 0) - (d.left ? 1 : 0);
+    const dirZ = (d.up ? 1 : 0) - (d.down ? 1 : 0);
+    const hay = dirX !== 0 || dirZ !== 0;
+
+    const kind = readLoco(locoState, {
+        down: hay,
+        justDown: hay && !locoWasDown,
+        justUp: !hay && locoWasDown,
+        time: time,
+        dir: { x: dirX, z: dirZ }
+    });
+    locoWasDown = hay;
+
+    return { kind, dirX, dirZ };
+}
+
+/**
  * RESUELVE EL CHOQUE ENTRE LOS DOS CUERPOS.
  *
  * Solo mira a los dos luchadores (no la utileria). Si el veredicto dice que no
@@ -861,6 +900,11 @@ function render() {
     ui.syncInput();
     const input = inputMapper.snapshot(ui.touchControls, cam, toOpp);
     inputMapper.tick(dt);
+
+    // El boton de mover se lee aparte: es lo que distingue un paso por toque
+    // de mantener y andar (core/locomotion.js).
+    const loco = readMoveInput(inputMapper.time);
+    if (entities[0]) entities[0].loco = loco;
 
     // --- Boton multiple ---------------------------------------------------
     updateActionButton(input, dt);
