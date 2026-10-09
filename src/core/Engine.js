@@ -37,11 +37,13 @@
 
 import UI from '../ui/UI.js';
 import { ControlsScreen } from '../ui/ControlsScreen.js';
+import { resolveClash } from './clinch.js';
 import HUD from '../ui/HUD.js';
 import LoadingScreen from '../ui/LoadingScreen.js';
 import SelectScreen from '../ui/SelectScreen.js';
 import StageSelect from '../ui/StageSelect.js';
 import { loadCharacterModel } from '../render/CharacterModel.js';
+import { Cape } from '../render/ClothMesh.js';
 import { InputMapper } from './entities/InputMapper.js';
 import FighterEntity, { nextStance } from './entities/FighterEntity.js';
 import { StaminaGauge } from './combat/Stamina.js';
@@ -55,6 +57,12 @@ const { Intent } = SPF;
 
 // Modelo del peleador. Se puede cambiar por ?modelo=<ruta> en la URL para
 // probar otro sin tocar el codigo (ver ASSETS.md).
+//
+// `?piezas=1` cuelga primitivas (capsulas y cajas) de los huesos del CONTRATO
+// encima del .glb. Es el "maniqui de piezas" (render/PartMannequin.js): sirve
+// para comprobar la animacion sin depender de la malla de ningun modelo
+// concreto, y de paso da una silueta clara de quien es quien en el ring.
+const USE_PARTS = new URLSearchParams(location.search).get('piezas') === '1';
 const MODEL_URL = (() => {
     const alt = new URLSearchParams(location.search).get('modelo');
     return alt ? './' + alt.replace(/^\.?\//, '') : './assets/characters/mannequin.glb';
@@ -605,7 +613,12 @@ async function boot() {
 
     for (const f of fighters) {
         try {
-            f.model = await loadCharacterModel(scene, MODEL_URL, { name: f.name });
+            f.model = await loadCharacterModel(scene, MODEL_URL, {
+                name: f.name,
+                // Las piezas se cuelgan de los huesos del contrato, asi que el
+                // .glb puede ser el que sea: la silueta siempre es la misma.
+                parts: USE_PARTS
+            });
         } catch (err) {
             console.error('No se pudo cargar ' + MODEL_URL, err);
             // Un modelo que no carga NO puede ser un problema que tumbe el
@@ -613,7 +626,11 @@ async function boot() {
             f.failed = true;
             continue;
         }
-        tint(f.model, f.color);
+        // Las piezas tienen su propio metodo de tinte (deja manos y cabeza mas
+        // claras para que se vea de quien es quien a tres metros); el .glb se
+        // tiñe entero.
+        if (USE_PARTS) f.model.tintParts(f.color);
+        else tint(f.model, f.color);
         // Cada peleador en su esquina, mirando al centro.
         f.model.place(f.x, f.z, f.facing);
     }
@@ -624,13 +641,42 @@ async function boot() {
     // ataca: la IA del rival es un paso posterior.
     for (const f of fighters) {
         if (!f.model) continue;
-        entities.push(new FighterEntity({
+        const ent = new FighterEntity({
             fighter: f,
             model: f.model,
             characterId: f.characterId || 'BASE',
             id: f.name,
             stance: f.name === 'P2' ? 'RELAX' : 'SHELL'
-        }));
+        });
+
+        // --- LA CAPA (tela) ---------------------------------------------
+        // Se le da UNA CAPA a cada peleador. La costura va cosida a la
+        // clavicula y se actualiza cada frame con la FK del rig, asi que la
+        // capa sigue al cuerpo en los golpes, en el salto y en la levantada
+        // sin que nadie tenga que animarla.
+        //
+        // Va DESPUES de crear la entidad porque la entidad es la que escribe la
+        // pose: la capa se actualiza al final de su update (ver
+        // FighterEntity._pose), y para eso necesita existir antes.
+        const cm = new B.StandardMaterial('cape' + f.name, scene);
+        const [r, g, b] = f.color;
+        cm.diffuseColor = new B.Color3(r * 0.45, g * 0.45, b * 0.5);
+        cm.specularColor = new B.Color3(0.05, 0.05, 0.06);
+        cm.backFaceCulling = false;   // la capa es una superficie sin grosor
+        ent.cape = new Cape(B, scene, f.model, {
+            name: 'cape' + f.name,
+            material: cm,
+            cols: 6, rows: 8,
+            width: 0.44, length: 0.66,
+            // 14 cm detras del pecho. Medido: cosida pegada (7 cm) la tela
+            // nace dentro de la capsula del torso y sale despedida; a 14 cm cae
+            // limpia. Ver la nota de Cloth.stepCloth.
+            seedY: 1.42,
+            seedZ: -0.14,
+            groundY: 0
+        });
+
+        entities.push(ent);
     }
 
     // --- Interfaz ---------------------------------------------------------
@@ -737,6 +783,11 @@ function render() {
         }
         for (const prop of world.props) prop.update(dt);
 
+        // CHOQUE entre los dos cuerpos (core/clinch.js). Se comprueba DESPUES
+        // de mover a los dos y ANTES de aplicar el ring-out, asi que un choque
+        // que manda a alguien al suelo puede ser lo que provoque que se salga.
+        resolveBodyClash(dt, input);
+
         // Quien se sale del ring paga 50 de vida y los dos vuelven al centro.
         // Se comprueba DESPUES de mover a todos, no dentro de la entidad: si
         // se hiciera ahi, el rival podria "arrastrar" al otro fuera el mismo
@@ -801,6 +852,51 @@ window.SANPABLERA.punch = function (name, moveKey) {
     const intent = moveKey === 'ATAQUE_PESADO' ? Intent.ATAQUE_PESADO : Intent.ATAQUE_LIGERO;
     e.tryIntent(intent);
     return true;
+};
+
+/**
+ * Recibe un golpe a mano para ver la REACCION sin tener que pegarlo
+ * (debug de la matriz 3x3 de alturas y potencias):
+ *
+ *   SANPABLERA.recibir('P1', 'ALTO', 'FUERTE')
+ *   SANPABLERA.recibir('P2', 'BAJO', 'DEBIL')
+ */
+window.SANPABLERA.recibir = function (name, altura, potencia) {
+    const e = entities.find(x => x.fighter.name === name);
+    const rival = entities.find(x => x.fighter.name !== name);
+    if (!e || !rival) return false;
+    // Un golpe de mentira con el frame data que decide la reaccion. Se usa el
+    // mismo `move` que usaria un golpe de verdad, para que la prueba vea lo
+    // que vera en partida.
+    const move = {
+        key: 'DEBUG', label: 'debug', state: 0, phase: 'GROUND',
+        startup: 4, active: 3, recovery: 12, duration: 19,
+        damage: potencia === 'FUERTE' ? 15 : potencia === 'MEDIO' ? 9 : 4,
+        hitstun: potencia === 'FUERTE' ? 22 : potencia === 'MEDIO' ? 15 : 10,
+        blockstun: 0,
+        hitLevel: potencia === 'FUERTE' ? 'FUERTE' : potencia === 'DEBIL' ? 'BAJO' : 'MEDIO',
+        power: potencia, height: altura,
+        type: 'LINEAL', breaksGuardHeight: 'ALTA',
+        knockdown: potencia === 'FUERTE' ? 'ALWAYS' : 'NONE',
+        launch: { x: potencia === 'FUERTE' ? 4 : 1, y: 0 },
+        juggleAdd: 0, hitstop: 6, radius: 0.5, forward: 0.5,
+        hitbox: { radius: 0.5, forward: 0.5, centerY: 1.1 }
+    };
+    e.takeHit(move, { fighter: rival.fighter }, world);
+    return { altura, potencia };
+};
+
+/** Cambia la tela (o la quita) para ver como afecta. */
+window.SANPABLERA.tela = function (name, on) {
+    const e = entities.find(x => x.fighter.name === name);
+    if (!e || !e.cape) return false;
+    e.cape.setEnabled(on !== false);
+    return true;
+};
+
+/** Viento de prueba sobre las capas. */
+window.SANPABLERA.viento = function (x, y, z) {
+    for (const e of entities) if (e.cape) e.cape.env.wind = [x, y, z];
 };
 
 /** Elige la postura del peleador (SHELL · LEAD · RELAX · PRESS...). */

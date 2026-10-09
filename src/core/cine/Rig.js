@@ -290,21 +290,33 @@ export function fk(rig, pose, out) {
     for (const b of rig.bones) {
         const dq = rotOf(pose, b.contract);
         const dp = posOf(pose, b.contract);
-        // El repositorio YA viene escalado por buildRig, asi que el delta de
-        // traslacion va en metros de espacio de personaje y no se reescala.
-        const lt = (dp[0] || dp[1] || dp[2]) ? vadd(b.localT, dp) : b.localT;
         const lq = qnorm(qmul(b.localQ, dq));
+        // En los HIJOS el delta entra en el `localT`: ahi el localT es el
+        // desplazamiento respecto al padre, y sumarselo es lo que coloca la
+        // articulacion. El repositorio ya viene escalado por buildRig, asi que
+        // el delta va en metros de personaje y no se reescala.
+        const lt = (dp[0] || dp[1] || dp[2]) ? vadd(b.localT, dp) : b.localT;
 
         if (b.parentIndex < 0) {
             // El nodo raiz del archivo puede venir tumbado (Z arriba). El
             // rootFix lo pone en pie: sin esto la FK daria una pose que no
             // coincide con restWorld y el IK apuntaria al sitio equivocado.
             res.q[b.contract] = qnorm(qmul(rig.rootFix, lq));
-            // El delta se suma DESPUES del rootFix a proposito. Los deltas de
-            // Pose.js estan en espacio de personaje (Y arriba), y el rootFix
-            // intercambia Y por Z: aplicarlo antes haria que "bajar la cadera"
-            // empujara al cuerpo hacia delante en vez de hacia el suelo.
-            res.p[b.contract] = vadd(qRotateVec(rig.rootFix, lt), dp);
+            // El delta de la RAIZ se suma UNA SOLA VEZ, y DESPUES del rootFix.
+            //
+            // Los deltas de Pose.js estan en espacio de personaje (Y arriba) y
+            // el rootFix intercambia Y por Z: sumarlos antes de rotar haria que
+            // "bajar la cadera" empujara al cuerpo hacia delante en vez de hacia
+            // el suelo.
+            //
+            // OJO, AQUI HABIA UN BUG DE TRABAJO DOBLE: `lt` se armaba con el
+            // delta dentro y despues el delta se sumaba OTRA VEZ aqui, con lo
+            // que "bajar la cadera 10 cm" la bajaba 20. Como la pelvis es la
+            // raiz en todos los modelos, agacharse hundia el doble de lo
+            // pedido. No reventaba nada (el IK se adaptaba y de pie se veia
+            // bien) pero los golpes agachados salian por debajo del suelo y los
+            // del suelo se hundian el doble.
+            res.p[b.contract] = vadd(qRotateVec(rig.rootFix, b.localT), dp);
         } else {
             const P = rig.bones[b.parentIndex];
             const pq = res.q[P.contract];

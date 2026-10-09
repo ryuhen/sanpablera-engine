@@ -6,6 +6,9 @@ Esta bitácora nos permite registrar y sincronizar las actividades realizadas en
 
 | Fecha | Autor | Commit | Actividad | Notas |
 |---|---|---|---|---|
+| 2026-10-09 | Sistema | *este commit* | Tela simulada, maniqui de piezas, golpes por contexto y la matriz de reacciones (3 alturas x 3 potencias) | **1 · SIMULADOR DE TELA** (`core/cloth/Cloth.js`, Verlet con restriccion de distancia, puro y testeado en Node). Se busco en npm y se descarto bajar nada: las librerias de tela de navegador (`three-simplecloth` y las de Three.js WebGPU) estan atadas a Three.js, y este motor usa Babylon; Ammo/Cannon si tienen soft bodies pero son motores rigidos completos (2 MB de WASM para 40 particulas). Ademas el proyecto escribe todo como modulos puros (`tests/loader.mjs` obliga a ello) y un solver atado a un motor 3D no se puede testear. El solver trae **tres tipos de cuerda** (estructural, cizallamiento y doble salto) porque sin cizallamiento la tela se ve como paramalla y sin doble salto se ve como humo, 2 subpasos por frame (con uno solo sale goma, no tela), colision contra suelo, esferas y capsulas, viento y rafagas. **La costura se cose con el ancho del pano**: si es mas corta, las cuerdas de la primera fila quedan comprimidas para siempre (los dos extremos estan clavados y el solver no puede ganar) y la capa nace con un bulto en los hombros que no se va. Se expone `pinMismatch` para verlo, porque en pantalla el sintoma es "la capa tiene un bulto" y no dice nada de la anchura. **La capa se cose 14 cm DETRAS del pecho, no pegada**: medido, pegada (7 cm) la tela nace dentro de la capsula del torso y sale despedida (estiramiento de 3,3 cm); a 14 cm cae limpia (0,6 cm) y a 20 cm casi nada (0,1 cm). **2 · MANIQUI DE PIEZAS** (`render/PartMannequin.js`): humanoide construido con capsulas, cajas y esferas colgadas de los huesos DEL CONTRATO, no de los nombres del archivo. Se activa con `?piezas=1` y quita de en medio el problema viejo del modelo de Quaternius: las piezas son propias, asi que la silueta es siempre la misma y la postura procedural funciona con cualquier `.glb`. Un peleador mas corpulento es una tabla de medidas distinta, no un asset. Se tine por peleador dejando manos y cabeza mas claras, que es lo que hace legible de quien es quien a tres metros. **Bug encontrado al probarlo**: el llamante emparejaba malla y hueso por indice sobre la tabla de entrada, asi que en cuanto el modelo no traia un hueso (una fila se saltaba) **todas las piezas siguientes llevaban el nombre de otra** y al tintar se pintaban las manos como torso. Ahora `buildParts` devuelve `contracts` en el mismo orden. **3 · GOLPES POR CONTEXTO** (`entities/AttackPoses.js`): el mismo jab salia igual de pie, agachado y en el aire, y en el aire clavaba los pies donde estaria el suelo. Ahora hay **5 familias** (jab, gancho, ascendente, patada, barrido) x **4 contextos** (de pie, agachado, aire, suelo), y el que decide el contexto es el ESTADO, no el boton. El jab agachado llega 20 cm mas abajo que el de pie, que es lo que hace que el boton de abajo se vea que hace algo. **4 · MATRIZ DE REACCIONES** (`entities/HitReactions.js`): antes habia UNA (`flinchPose` miraba solo si era FUERTE) para nueve casos. Ahora son 9 filas de datos: ALTO/MEDIO/BAJO x DEBIL/MEDIO/FUERTE, con cadera, torso, cabeza, brazos, piernas y **cuanto tarda en recuperarse** (un golpe fuerte vuelve a la guardia despacio: es lo que el jugador lee como "me han pegado fuerte"). El golpe BAJO dobla el torso hacia DELANTE, que es lo que hace que un barrido se lea como barrido. Y la reaccion se le **echa encima** de la guardia (mezcla aditiva) en vez de sustituirla, que es la diferencia entre "le pegan sin que deje de estar en guardia" y un muneco de trapo. **5 · GOLPES EN EL SUELO Y LEVANTADA**: `isDownAttack` devolvia `false` fijo, asi que el castigo al rival caido no existia. Ahora `_downAttack` clasifica el golpe (PIE / MANOS / SALTAR / PESADO) segun la postura del RIVAL y la potencia del golpe, y `wakeupPose` levanta del suelo mostrando la mecanica (apoyo en el codo, se encoge, se empuja) en vez de teletransportarse a la guardia. **6 · UN BUG DE 4 MESES EN LA FK** (`cine/Rig.js`): el delta de traslacion de la RAIZ se sumaba **dos veces** (una al armar el `localT` y otra al escribir la posicion), asi que "bajar la cadera 10 cm" la bajaba 20. Como la pelvis es la raiz en todos los modelos, agacharse hundia el doble de lo pedido. No reventaba nada: el IK se adaptaba y de pie se veía bien, y por eso nadie lo noto en cuatro meses. Lo delata el nuevo `tests/anim.smoke.mjs`, que compara el delta pedido contra el obtenu (0,65 y no 0,35). **7 · SIGNOS QUE SALIAN AL REVES**: la cadera de las reacciones se escribia como `restHipY - altura` cuando `setPos` guarda un delta (con el signo mal la cadera MEDIA salia a **1,18 m**, mas arriba que de pie) y `groundAttackPose` restaba donde tenia que sumar (el pisoton salia con los pies por encima de la cintura). Los dos estan documentados con el signo verificado contra el rig. Ademas `groundAttackPose` ignoraba el parametro `phase` y repartia `t` en tercios, con lo que el amago y el golpe salian identicos. **8 · `gust()` recibe m/s, no un desplazamiento**: el empuje se aplica a `prev`, que en Verlet guarda metros por frame, y dar un numero en "cuanto se mueve" hacia que un golpe fuerte rebotara la capa de -0,55 a -0,81 y volviera a +0,43 en tres frames (una serpentante, no una capa). Ahora convierte con el dt y el efecto es el mismo a 30 y a 144 fps. **PRUEBAS**: `tests/anim.smoke.mjs` (**112**, la capa de animacion sobre el rig real: que el jab agachado llegue mas bajo, que un golpe ALTO no se parezca a uno BAJO, que la tela caiga y no se estire, y dos tests de INTEGRACION con dos entidades peleando de verdad) y `tests/render.smoke.mjs` (**29**, lo que toca Babylon con un **BABYLON de mentira**: piezas colgadas del hueso correcto, tinte, capa, viento, y que un modelo sin el hueso ancla no reviente). Con la suite de aire y
+      clinch que ya venia a medias: **761 comprobaciones, 0 fallos** |
+| 2026-10-09 | Sistema | *este commit* | El peleador de Quaternius salia hecho una bola: era el rootFix contado dos veces | La entrada anterior de `ASSETS.md` atribuia el fallo a `Stances.js` y a "las longitudes que espera el IK". **Era un diagnostico equivocado**: el esqueleto estaba bien todo el rato (cadena pelvis 0,94 -> cabeza 1,48) y el rig mapeaba 21/21. El fallo estaba en el PUENTE, en `CharacterModel.applyPose`. Ese metodo escribe un LOCAL en cada hueso, pero el hueso raiz del rig no es el raiz de la ESCENA: el `.gltf` de Quaternius cuelga la pelvis de un nodo `root` con un giro de **90 grados sobre X**, que es justo el `rootFix 'Z_UP'` que el rig aplica. Babylon compone ese nodo encima del local escrito, asi que el giro se sumaba dos veces y la pelvis acababa a **1,34 m** de donde el rig creia: tumbada contra una malla de pie. De ahi la bola. Se anade `wrapperTransform()`, que mide el envoltorio acumulado del archivo por encima del hueso raiz, y `applyPose` lo neutraliza con su inversa antes de escribir: el error pasa a **0,0000 m**. El mannequin nunca lo noto porque su cadena (`Z_UP -> Armature`) es identidad, y por eso el bug solo puede aparecer con un archivo que traiga su propia correccion de eje. Nuevo `tests/glb.mjs parseGLTF/loadGLTFPair` para poder testear un `.gltf` + `.bin` (el lector solo sabia de `.glb`) y nuevo bloque `Puente rig->Babylon` en `tests/cine.smoke.mjs` que verifica los DOS modelos reales: que con la correccion la pelvis cae donde dice el rig, y que sin ella el error pasaria de un metro. **534 comprobaciones, 0 fallos** |
 | 2026-10-08 | Sistema | *este commit* | Salirse del ring es una falta: 50 de daño y vuelta al centro | `RING_LIMIT` era una **pared invisible**: `FighterEntity._moveWorld` recortaba la posicion dentro del radio, asi que nadie podia salirse nunca y empujar al rival hacia las cuerdas era imposible. Ahora el limite se comprueba DESPUES de mover a todos (en el bucle del engine, no dentro de la entidad, para que el rival no pueda "arrastrar" al otro fuera el mismo frame en que se mueve) y `world.ringOut()` penaliza: **50 de vida** al que cruza, los dos vuelven al centro separados lo justo para no violar `MIN_SPACING`, mirandose otra vez, con la inercia a cero y el `inputMapper` reiniciado. Hitstop de 14 frames para que se note. Verificado en el navegador con los dos peleadores: vida 100 -> 50 y ambos en el centro. **517 comprobaciones, 0 fallos** |
 | 2026-10-08 | Sistema | *este commit* | **Los golpes no conectaban: el combate era imposible** | Los peleadores salian con `facing: 0` y `facing: PI` en `FIGHTER_CORNERS`, pero las esquinas estan en diagonal, asi que `facing: 0` (que apunta a +Z) miraba **justo hacia el lado contrario del rival**: todos los golpes salian de espaldas, la hitbox se calculaba al otro lado y no impactaba nunca. La vida del rival no bajaba de 100 en ninguna circunstancia, ni con la API interna `SANPABLERA.punch`. Ahora el facing se **calcula** con `facingToward()` para que los dos miren al otro desde el primer frame. Verificado en navegador: `resultado: "hit"`, vida del rival 100 -> 95. Los ataques y los botones de pantalla ya funcionaban (J -> `ATAQUE_LIGERO` con 13 rotaciones del brazo, y el boton "Attack 1" igual por `pointer`); lo que faltaba era que **algo conectase**. Ojo con el alcance: la distancia minima a la que el motor deja acercarse (`MIN_SPACING` 0,9 m) esta justo por encima del alcance efectivo del golpe corto (radio 0,42 + casco 0,45 = 0,87 m), asi que hay margen muy poco: sigue haciendo falta acercarse. **517 comprobaciones, 0 fallos** |
 | 2026-10-08 | Sistema | *este commit* | Teclado, mando y Bluetooth, mas el fix del rig que hacia que el juego no respondiera | **Controles**: `ui/InputRouter.js` une teclado, mando (Gamepad API = llega el Bluetooth) y tactil en el mismo estado, asi que ni la FSM ni el `InputMapper` se enteran; `ui/ControlsSettings.js` guarda el mapeo en `localStorage`; `ui/ControlsScreen.js` es el menu (**F1**) para reasignar las 8 acciones y ver que mando hay conectado. Layout por defecto: WASD/flechas, **J** ligero, **K** pesado, **L** guardia, **U** accion. Arreglado tambien que las diagonales del dpad tactil no movieran (el `InputMapper` solo leia up/down/left/right y las esquinas se guardaban sueltas). **Bug grave, preexistente (commit 44e2505)**: `readModelBones` descartaba todo nodo con geometria *descendiente* sin bajar a sus hijos, y el envoltorio `__root__` del importador de glTF tiene la malla debajo: el rig salia con **0 huesos**, `placeFoot` reventaba en cada frame y por eso no habia dos peleadores ni ningun control. Se arregla distinguiendo geometria propia de la de los descendientes. Ademas `ImportMesh` cachea por URL (hacia que el segundo peleador robase los meshes del primero): ahora `LoadAssetContainerAsync`; y el `pivot` del saco se creaba sin quaternion (`Engine.js`). **517 comprobaciones, 0 fallos** |
@@ -73,11 +76,12 @@ pendiente la confirmación visual en el navegador.
 - [x] Roster con nombres comunes memorables, historia y estilo por peleador (`core/roster.js`)
 - [x] Peleador del jugador: localStorage, renombrable (R en la selección), hereda movesets (`core/CustomFighter.js`, `ui/SelectScreen.js`)
 - [x] Eventos pointer en la UI táctil (`ui/UI.js`): el pad y los botones responden al ratón/estilo además del dedo
-- [x] `npm test` en verde: **517 comprobaciones, 0 fallos** (FSM 68 · Design 67 · Cine 333 · HUD 23 · Stamina 26)
+- [x] `npm test` en verde: **761 comprobaciones, 0 fallos** (FSM 68 · Design 67 · Cine 350 · Aire+clinch 86 · Anim 112 · Render 29 · HUD 23 · Stamina 26)
 - [x] Los tres arquetipos base registrados como datos puros (`core/archetypes.js`) y asignados al roster
 - [x] Escalada de combate por fases como tabla modular (`core/phases.js`): arbitro, ventana de 1 s, zonas legales/ilegales, armas y desarme
 - [x] Sistema de estancias del arquetipo YUGO (`core/boxing.js` + `FighterEntity._stances`): rotacion, inversion, baile, fijacion y las tres posturas de comando
 - [x] Moveset exclusivo de cada postura en el primer peleador (`Movesets.js` capa 1b) y poses procedurales (`FighterRig.js`)
+- [x] Postura procedural sobre el esqueleto de Quaternius: el fallo era el `rootFix` duplicado en el puente (`wrapperTransform` + `applyPose`), no `Stances.js`
 
 ### Verificación: la biblia (Specs.txt) contra el motor
 
@@ -91,13 +95,16 @@ Lo que exige la biblia de diseño y dónde está hoy:
 | 4. HUD (vida + recurso + timer) | ✅ hecho | `ui/HUD.js` |
 | 5. Paso → caminar → correr; dash, dash agachado (esquiva altos), dash aéreo (esquiva bajos) | ✅ hecho | `entities/FighterEntity.js`: máquina de locomoción + ventanas de esquive |
 | 6. LINEAL esquivable / AREA caza al que se mueve (stun o derribo) | ✅ hecho | `FighterEntity.defend()` + `Engine.js` `world.tryHit` |
-| 7. Moveset por movimiento (jab, gancho, upper, plexo...) | 🟡 parcial | Moveset por capas de Pedro (`Movesets.js`) y mods de pose por locomoción (`FighterRig.ATTACK_LOCO_MODS`); **falta** un moveset DISTINTO por estado de movimiento (caminando / corriendo / dash) |
+| 7. Moveset por movimiento (jab, gancho, upper, plexo...) | 🟡 parcial | Moveset por capas de Pedro (`Movesets.js`) y **5 familias de golpe x 4 contextos** (`AttackPoses.js`: de pie / agachado / aire / suelo); **falta** un frame data DISTINTO por estado de locomoción (caminando / corriendo / dash): hoy la silueta acompaña pero los frames son los mismos |
 | 7. Ataques aéreos (↑↑ + dir + puño/patada) | ✅ hecho | `InputMapper` (secuencia doble-arriba) + `FighterEntity._airAttack` |
 | 7. Cuadrúpedos y deslizamientos (acción + dir + puño) | ✅ hecho | `InputMapper` (combos) + `FighterEntity._combos` |
 | 7. Variantes frente / espaldas a cámara | ✅ hecho (datos) | `MoveTable` (clips por `VisualFacing`) |
 | 8. FSM: bases, suelo, orientaciones, stances, juggle, hit levels | ✅ hecho | `fsm/` (68 comprobaciones) |
 | 8. Tortuga / dominante (suelo interactivo) | 🟡 parcial | Estados y sesión de agarre existen (`GrappleSession`, `GrappleStates`); **falta el cableado entre los DOS peleadores** (`canGrapple: () => false` en `FighterEntity`) |
-| 8. Aproximación de suelo (correr al caído, ground slides) | 🟡 parcial | El deslizamiento existe; falta el castigo al caído (`isDownAttack` está declarado en `false`) |
+| 8. Aproximación de suelo (correr al caído, ground slides) | 🟡 parcial | El deslizamiento y el **castigo al caído** existen (`HitReactions.groundAttackPose` + `FighterEntity._downAttack`, con sus cuatro siluetas: pisotón / manos / patada descendente / pesado) y la **levantada** muestra la mecánica (`wakeupPose`); falta el **ground slide ofensivo** (deslizarse hasta el rival caído) |
+| 7 (nuevo). Reacciones lógicas de golpe (alto/medio/bajo x débil/medio/fuerte) | ✅ hecho | `entities/HitReactions.js`: 9 filas de datos, potencia desde el frame data, la reacción se echa encima de la guardia |
+| (nuevo). Tela simulada | ✅ hecho | `core/cloth/Cloth.js` (Verlet puro) + `render/ClothMesh.js` (puente a Babylon, malla actualizable) + `Cape` con la costura cosida a la clavícula |
+| (nuevo). Modelos genéricos con piezas | ✅ hecho | `render/PartMannequin.js`: capsulas y cajas colgadas de los huesos del CONTRATO, con `?piezas=1` para probarlo |
 | 9.1 Peleador personalizado (localStorage, renombrable) | ✅ hecho | `core/CustomFighter.js`, `ui/SelectScreen.js` |
 | 9.2 Nube por subapase (membresía) | ⏳ futuro | Documentado en Specs 9.2 |
 | 9.3 MMORPG "Isla Caribe" | ⏳ futuro | Documentado en Specs 9.3 |
@@ -105,11 +112,51 @@ Lo que exige la biblia de diseño y dónde está hoy:
 | 12. Escalada por fases (datos modulares) | ✅ hecho (tabla) · ⏳ aplicar | `core/phases.js`: reglas, arbitro, ventana, zonas y armas por fase |
 | 13. Estancias de boxeo (rotación, baile, Target Action, comando) | ✅ hecho | `core/boxing.js` + `FighterEntity._stances` + poses en `FighterRig.js` |
 
+### Cerrado en esta sesión (pendientes que ya no lo están)
+
+- [x] ~~**Castigo en el suelo**~~ (biblia 8): las cuatro siluetas de golpe
+      contra el rival caído (`HitReactions.groundAttackPose`), la clasificación
+      por postura del rival y potencia (`FighterEntity._downAttack`, que antes
+      devolvía `false` fijo) y la levantada (`wakeupPose`, que enseña el
+      apoyo en el codo en vez de teletransportarse).
+- [x] ~~**Tela simulada**~~ (`core/cloth/Cloth.js` + `render/ClothMesh.js` +
+      `Cape`). Lo que queda, en "Pendiente": darle forma de verdad y decidir
+      quién la lleva.
+- [x] ~~**Modelos genéricos con piezas**~~ (`render/PartMannequin.js`, con
+      `?piezas=1`). Falta verlo en el navegador.
+- [x] ~~**Reacciones lógicas de golpe**~~ (`HitReactions.js`: 3 alturas x
+      3 potencias, 9 filas de datos).
+- [x] ~~**Golpes por contexto**~~ (`AttackPoses.js`: 5 familias x 4
+      contextos). El *frame data* por locomoción sigue pendiente, es otra cosa.
+
 ### Pendiente (siguiente sesión)
 
-- [ ] **Confirmar el personaje en el navegador** (la validación hecha es
-      numérica, no visual): `npm start` y ver el mannequin de pie, los
-      colores por peleador, el HUD y las pantallas de selección.
+- [ ] **CONFIRMAR TODO EN EL NAVEGADOR.** Es la tarea que mas importa y la mas
+      mudahosa de hacer aqui: lo de esta sesion esta verificado en **números**
+      (`npm test`, 761 comprobaciones) pero no se ha visto. Con `npm start`:
+      1. `?piezas=1` — el maniqui de piezas: dos peleadores de colores
+         distintos, con la capa colgando de los hombros. Es la forma mas
+         rapida de comprobar la animacion, porque la silueta es siempre la
+         misma y no depende de ninguna malla.
+      2. Los golpes: de pie (J), pesado (K), agachado (abajo + J), aire
+         (doble arriba + delante + J). El jab agachado tiene que verse mas
+         bajo que el de pie; en el aire los pies NO pueden clavarse.
+      3. Las reacciones: `SANPABLERA.recibir('P2', 'ALTO', 'FUERTE')` y las
+         ocho combinaciones mas. Un golpe ALTO y uno BAJO tienen que verse
+         distintos, y un FUERTE tiene que volver a la guardia mas despacio.
+      4. El castigo al caido: derribar al rival (golpe FUERTE) y golpearle
+         mientras esta en el suelo — la silueta tiene que cambiar a pisoton.
+      5. La tela: `SANPABLERA.viento(6, 0, 0)` y `SANPABLERA.tela('P1', false)`.
+         La capa no debe ir un frame por detras del cuerpo ni quedarse pegada
+         al pecho.
+      6. `?modelo=assets/characters/quaternius-superhero-male/Superhero_Male_FullBody.gltf`
+         — el de Quaternius, que ya cuadra en numeros pero sigue sin verse.
+- [ ] **Morphs de física**: la capa da la tela y las reacciones dan el
+      movimiento del cuerpo, pero los 9 `MorphId` de `CineConstants.js`
+      (squash, stretch, head lag, jiggle...) siguen sin runtime. El sitio
+      natural es el mismo `fleeReactionPose`, que ya sabe DONDE pega el golpe
+      (`IMPACT_BONE_GAIN`) y con que potencia: el squash es el missing link
+      entre la matriz de reacciones y el ejecutor de impactos.
 - [ ] **Sistema de morphs de física** (muelle + amortiguación) sobre
       `MorphId`. Los 9 morphs ya están definidos en `CineConstants.js`;
       falta el runtime.
@@ -128,12 +175,23 @@ Lo que exige la biblia de diseño y dónde está hoy:
       existe; falta que el rival entre en el estado espejo y que los
       pedidos del UKE lleguen a la sesión del TORI). Es la puerta a la
       sumisión de Pedro y al suelo interactivo (biblia 8).
-- [ ] **Moveset distinto por estado de locomoción** (biblia 7): hoy la
-      pose cambia al caminar/correr/dash (`ATTACK_LOCO_MODS`) pero el
-      frame data es el mismo; la siguiente capa es frame data propio
-      por movimiento.
-- [ ] **Castigo en el suelo** (biblia 8): ataques contra el rival
-      caído (`isDownAttack`) y ground slides ofensivos.
+- [x] ~~**Moveset distinto por estado de locomoción**~~: la pose ya cambia
+      por contexto (4 siluetas en `AttackPoses.js`). Queda el frame data, que
+      esta mas abajo y es otra cosa.
+- [ ] **Ground slide ofensivo** (biblia 8): el castigo al caído ya sale
+      (`groundAttackPose` + `_downAttack`) y la levantada tambien
+      (`wakeupPose`); falta el deslizarse hasta el rival del suelo. Ojo:
+      `_downAttack` mira la postura del RIVAL, asi que al cablear el slide hay
+      que decidir si cuenta como ataque contra el suelo (y por tanto cambia la
+      silueta) o es solo movimiento.
+- [ ] **La capa como pieza de personaje, no como adorno**: ahora la capa es
+      la misma para los dos peleadores y cuelga de la clavícula. Falta decidir
+      que la lleva (¿todos? ¿solo los arquetipos con peso?), y las piezas de
+      tela que si tienen forma: faldón, mangas, cinta en la cabeza. El solver
+      y `ClothMesh` ya las soportan; es trabajo de datos.
+- [ ] **Frame data por estado de locomoción** (biblia 7): la silueta ya
+      acompaña al movimiento (4 contextos) pero los frames son los mismos en
+      caminar, correr y dash.
 - [ ] **Aplicar las fases al combate** (Specs 12): las reglas ya
       están como datos (`core/phases.js`), falta que el referee,
       la ventana de 1 s en el suelo, los jueces con tarjetas y el
@@ -166,4 +224,4 @@ Lo que exige la biblia de diseño y dónde está hoy:
 
 ---
 
-*Última actualización: 2026-10-07*
+*Última actualización: 2026-10-09*

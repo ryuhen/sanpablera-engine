@@ -160,6 +160,11 @@ export class FighterEntity {
         this._lastInput = null;
         this.pendingAirAttack = null;   // intent de ataque aereo en el aire
 
+        // El golpe que entro por ultima vez (para la matriz de reacciones) y
+        // la tela del peleador, si el engine le ha dado una.
+        this._hitMove = null;
+        this.cape = null;
+
         if (!registeredCharacters.has(this.characterId)) {
             registerCharacterStances(this.characterId, defineState);
             registeredCharacters.add(this.characterId);
@@ -266,8 +271,8 @@ export class FighterEntity {
         // 9. Orientacion.
         this._face(world);
 
-        // 10. Pose.
-        this._pose(world);
+        // 10. Pose (y tela, si la tiene).
+        this._pose(world, dt);
     }
 
     // =========================================================================
@@ -777,7 +782,7 @@ export class FighterEntity {
         f.facing = Math.atan2(o.fighter.x - f.x, o.fighter.z - f.z);
     }
 
-    _pose(world) {
+    _pose(world, dt) {
         const fsm = this.fsm;
         const state = fsm.state;
         const o = world.opponentOf(this);
@@ -816,14 +821,81 @@ export class FighterEntity {
                 attack: fsm.move ? fsm.move.key : null,
                 attackPhase: fsm.getAttackPhase(),
                 attackT: attackProgress(fsm),
+                // --- lo que necesita la matriz de reacciones ------------------
+                // El GOLPE que ha entrado, no solo su nivel: la altura (cabeza,
+                // torso, pierna) y la potencia salen del frame data, y sin
+                // ellas la reaccion seria siempre la misma.
+                move: fsm.getData('lastHit') ? this._hitMove : null,
                 hitLevel: fsm.getData('hitLevel'),
-                down: fsm.getData('knockdown')
+                hitT: this._hitProgress(fsm),
+                // --- levantada y castigo al del suelo -------------------------
+                down: fsm.getData('knockdown'),
+                wakeT: this._wakeProgress(fsm),
+                downAttack: this._downAttack(o)
             };
             res = FighterRig.poseFor(this.model.rig, snap, opts);
         }
 
         this.model.applyPose(res.pose, res.state);
         this.model.place(this.fighter.x, this.fighter.z, this.fighter.facing);
+
+        // La tela va DESPUES de la pose: la costura se ata a los huesos con la
+        // FK ya escrita, que es la unica forma de que la capa no vaya un frame
+        // por detras del cuerpo.
+        if (this.cape) this.cape.update(dt, res.state);
+    }
+
+    /**
+     * Progreso dentro del hitstun (0..1): donde va la reaccion.
+     *
+     * POR QUE SE CALCULA AQUI Y NO EN LA FSM
+     *   El hitstun lo lleva el estado de impacto, pero el progreso sale de su
+     *   timer, y el `timer` de la FSM es un contador de frames internos que la
+     *   entidad no ve. Se reconstruye con el frame del estado y el limite del
+     *   golpe: es la misma cuenta que hace attackProgress para los ataques.
+     */
+    _hitProgress(fsm) {
+        if (!fsm.inGroup(StateGroup.IMPACT) && !fsm.inGroup(StateGroup.STUNNED)) return 0;
+        const total = fsm.getData('lastHit') && fsm.getData('lastHit').hitstun;
+        if (!total) return 0;
+        return Math.max(0, Math.min(1, fsm.frame / total));
+    }
+
+    /** Progreso de la levantada (0..1). */
+    _wakeProgress(fsm) {
+        if (!fsm.inGroup(StateGroup.WAKEUP)) return 0;
+        const st = fsm.state;
+        if (!st.durationFrames) return 0;
+        return Math.max(0, Math.min(1, fsm.frame / st.durationFrames));
+    }
+
+    /**
+     * Que clase de golpe contra el suelo es este, o null.
+     *
+     * SOLO CUANDO EL RIVAL ESTA TUMBADo. Antes `isDownAttack` devolvia false
+     * fijo y por eso el castigo al del suelo no existia (biblia 8). Aqui se
+     * decide por la postura del RIVAL: si esta en DOWNED, el golpe cambia de
+     * silueta y lo que sale es el montaje (un pie encima / manos al suelo /
+     * patada descendente), no el jab de siempre.
+     */
+    _downAttack(opponent) {
+        if (!opponent) return null;
+        if (!this.fsm.inGroup(StateGroup.ATTACKING)) return null;
+        if (!opponent.fsm.inGroup(StateGroup.DOWNED)) return null;
+        const move = this.fsm.move;
+        if (!move) return null;
+        // El golpe ALTO contra un cuerpo tumbado es el que pisa; el BAJO es
+        // inútil contra alguien que ya esta en el suelo.
+        // OJO: `move.height` es elvocabulario de ALTURA ('ALTO'/'MEDIO'/'BAJO'/
+        // 'SUELO'), que NO es SPF.HitLevel (el nivel del impacto). Son dos
+        // cosas distintas y confundirlas aqui haria que el barrido se tratara
+        // como un golpe a la cabeza.
+        if (move.height === 'BAJO' || move.height === 'SUELO') return null;
+        const damage = move.damage || 0;
+        if (damage >= 14) return 'PESADO';
+        if (move.hitLevel === SPF.HitLevel.FUERTE) return 'SALTAR';
+        if (move.height === 'ALTO' || move.key === 'UPPERCUT') return 'MANOS';
+        return 'PIE';
     }
 
     _onStateEnter(prevId) {
@@ -917,6 +989,17 @@ export class FighterEntity {
     takeHit(move, from, world, bonus) {
         const f = this.fighter;
         const wasAir = this.fsm.inGroup(StateGroup.AIRBORNE);
+        // Un golpe FUERTE que sale de la posicion delata la capa: la tela
+        // sale despedida para atras con el cuerpo. Sin esto la capa se queda
+        // pegada al pecho mientras el peleador vuela, que es de lo mas
+        // desconcertante que se puede ver en un juego de pelea.
+        if (this.cape && move.damage >= 10) {
+            const dir = from.fighter.facing;
+            // La capa sale despedida en la direccion del golpe (hacia el
+            // atacante es -Z en el espacio del que lo recibe). La velocidad es
+            // en m/s y escala con el dano: un golpe fuerte tira mas.
+            this.cape.gust([-Math.sin(dir), 0, -Math.cos(dir)], 1.4 + (move.damage || 10) * 0.12);
+        }
 
         f.health = Math.max(0, f.health - move.damage);
 
@@ -949,6 +1032,11 @@ export class FighterEntity {
 
         if (wasAir || move.launch.y > 0) this.juggle += (move.juggleAdd || 1);
         else this.juggle = 0;
+
+        // El golpe se guarda para la animacion: la matriz de reacciones necesita su
+        // ALTURA (cabeza / torso / pierna) y su potencia, que no estan en el
+        // `hitLevel` que guarda la FSM.
+        this._hitMove = move;
 
         this.fsm.onHit(hit);
         world.hitstop = Math.max(world.hitstop, move.hitstop / 60);

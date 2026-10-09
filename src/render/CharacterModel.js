@@ -31,12 +31,22 @@
  *   eso el generador escribe directamente los huesos y deja los Animation /
  *   AnimationGroup (clip grabados) para lo que si sea claveframe.
  *
- * MODELO ACTUAL
+ * MODELOS QUE FUNCIONAN
  * ----------------------------------------------------------------------------
- *   assets/characters/mannequin.glb (Khronos Rigged Figure, CC BY 4.0). Esta en
- *   Z arriba, asi que se compensa con rootFix 'Z_UP' en buildRig. El archivo
- *   tambien trae un nodo "Z_UP" en la raiz que hace lo mismo: por eso el
- *   personaje aparece de pie sin que haya que tocar el importador.
+ *   assets/characters/mannequin.glb (Khronos Rigged Figure, CC BY 4.0), Z arriba,
+ *   compensado con rootFix 'Z_UP'. Es el de por defecto.
+ *   assets/characters/quaternius-superhero-male/ (CC0), malla en Y y huesos en Z.
+ *
+ * EL TRAMPA DEL ENVOLTORIO
+ * ----------------------------------------------------------------------------
+ *   Que el root del RIG sea el mismo que el root de la ESCENA no es cierto. El
+ *   archivo puede colgar el hueso raiz de nodos intermedios (Armature, root,
+ *   Z_UP) que el rig no conoce porque no son huesos del contrato, pero que
+ *   Babylon sigue componiendo. applyPose escribe un LOCAL, y el mundo real es
+ *   `W * local` con W el envoltorio acumulado: si W ya trae la correccion de
+ *   eje, el rootFix se cuenta dos veces y el personaje se va 1,34 m al suelo.
+ *   wrapperTransform() mide W y applyPose lo neutraliza. El mannequin no lo
+ *   necesita (su envoltorio es identidad) y por eso ahi el bug nunca se vio.
  * ============================================================================
  */
 
@@ -44,11 +54,59 @@ import { buildBoneMap } from './BoneMap.js';
 import { buildRig, fk } from '../core/cine/Rig.js';
 import { createPose, rotOf, posOf } from '../core/cine/Pose.js';
 import { CFG } from '../core/cine/CineConstants.js';
+import { buildParts, tintParts } from './PartMannequin.js';
 
 /** Quita el sufijo del pivot de un nombre de glTF (`Bone.001` -> `Bone`). */
 function stripSuffix(name) {
     const m = /^(.*?)\.\d+$/.exec(name);
     return m ? m[1] : name;
+}
+
+/**
+ * La transform MUNDIAL acumulada de los envoltorios del ARCHIVO que hay por
+ * encima de un hueso: los nodos intermedios que mete el importador (Armature,
+ * root, Z_UP) y que NO son huesos del contrato, asi que el rig no los conoce.
+ *
+ * POR QUE HACE FALTA ESTE NUMERO
+ *   applyPose escribe el local del hueso raiz del rig. Babylon, al componer,
+ *   le aplica ENCIMA todos sus padres de verdad. El mundo resultante es por
+ *   tanto `W * local`, no `local`: si W es un giro, el hueso acaba en otro
+ *   sitio y la malla, que esta skinneada a el, sale retorcida.
+ *
+ *   El caso real: el .gltf de Quaternius trae un nodo `root` con un giro de
+ *   90 grados sobre X, que es EXACTAMENTE el rootFix 'Z_UP' que el rig aplica.
+ *   Con las dos correcciones, la cadera acababa a 1,34 m de donde deberia
+ *   (tumbada en vez de de pie) y el peleador salia hecho una bola. El mannequin
+ *   de Khronos no lo-sufría porque su cadena (`Z_UP -> Armature`) es identidad.
+ *
+ * @param {Array}  recs     registros de readModelBones, con `parentName`
+ * @param {string} rootName nombre real del hueso raiz del rig (p.ej. 'pelvis')
+ * @returns {number[]} quaternion [x,y,z,w] de W
+ */
+export function wrapperTransform(recs, rootName) {
+    const byName = new Map();
+    for (const r of recs) if (!byName.has(r.name)) byName.set(r.name, r);
+    const IDQ = [0, 0, 0, 1];
+    let cur = byName.get(rootName);
+    const chain = [];
+    while (cur && cur.parentName) {
+        chain.unshift(cur.parentName);
+        cur = byName.get(cur.parentName);
+    }
+    if (!chain.length) return IDQ.slice();
+    let W = IDQ;
+    for (const name of chain) {
+        const node = byName.get(name);
+        if (!node) continue;
+        W = qnormQ(qmulQuat(node.localQ, W));
+    }
+    return W;
+}
+
+function qinvQ(q) {
+    const n = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
+    if (n < 1e-12) return [0, 0, 0, 1];
+    return [-q[0] / n, -q[1] / n, -q[2] / n, q[3] / n];
 }
 
 /**
@@ -126,6 +184,12 @@ function qmulQuat(a, b) {
         a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
         a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]
     ];
+}
+
+function qnormQ(q) {
+    const n = Math.hypot(q[0], q[1], q[2], q[3]);
+    if (n < 1e-12) return [0, 0, 0, 1];
+    return [q[0] / n, q[1] / n, q[2] / n, q[3] / n];
 }
 
 /**
@@ -297,9 +361,55 @@ export class CharacterModel {
             this.nodes[b.contract] = b.model.node;
         }
 
-        // --- 6. Estado numerico inicial --------------------------------------
+        // --- 5b. Envoltorios del archivo por encima del hueso raiz ------------
+        //
+        // El rig solo conoce los huesos del contrato, pero en la escena el hueso
+        // raiz cuelga de los nodos intermedios del archivo (Armature, root,
+        // Z_UP...). Babylon los compone igualmente, asi que hay que conocerlos
+        // para poder neutralizarlos al escribir (ver applyPose).
+        const pelvisReal = this.boneMap.map.PELVIS;
+        this.wrapperQ = pelvisReal ? wrapperTransform(bones, pelvisReal) : [0, 0, 0, 1];
+        this.wrapperInv = qinvQ(this.wrapperQ);
+        // El envoltorio tiene que ser REALMENTE la identidad para que el rig y
+        // la escena hablen el mismo idioma. Si no lo es, la correccion es
+        // aplicarla; se deja constancia porque es el bug que hacia que el modelo
+        // de Quaternius saliera hecho una bola.
+        this.wrapperIsIdentity = Math.abs(this.wrapperQ[3]) > 0.9999;
+
+        // --- 6. PIEZAS (opcional): maniqui de primitivas ------------------
+        //
+        // Con `opts.parts` se cuelgan capsulas y cajas de los HUESOS DEL
+        // CONTRATO. No es un adorno: es lo que permite tener dos peleadores
+        // con silueta legible y colores distintos sin depender de que el
+        // .glb tenga una malla por personaje. Y como las piezas cuelgan del
+        // contrato (no de los nombres del archivo), la postura procedural
+        // funciona con cualquier modelo.
+        this.parts = null;
+        if (opts.parts) {
+            const built = buildParts(B, opts.scene, this.nodes, {
+                name: this.name,
+                parts: opts.parts === true ? undefined : opts.parts,
+                skin: opts.skin
+            });
+            this.parts = built.meshes.map((mesh, i) => ({
+                mesh,
+                contract: built.contracts[i]
+            }));
+            this.partMaterials = built.materials;
+        }
+
+        // --- 7. Estado numerico inicial --------------------------------------
         this.fkState = fk(this.rig, this.pose);
         this.applyPose(this.pose, this.fkState);
+    }
+
+    /**
+     * Tiñe las piezas con el color del peleador. Sin piezas no hace nada:
+     * el .glb ya trae su propio material y se tiñe con `tint()` en Engine.js.
+     */
+    tintParts(rgb) {
+        if (!this.parts) return null;
+        return tintParts(globalThis.BABYLON, this.scene, this.parts, rgb, { name: this.name });
     }
 
     /**
@@ -331,14 +441,33 @@ export class CharacterModel {
 
             // Las traslaciones SI: los deltas de la Pose van en metros reales y
             // la raiz los escala, asi que aqui se vuelven a dividir.
+            //
+            // PARA EL HUESO RAIZ DEL RIG hay que anular antes el envoltorio del
+            // archivo (ver wrapperTransform). Lo que se escribe abajo es un LOCAL,
+            // y Babylon le componera encima `wrapperQ`; sin neutralizarlo, ese
+            // giro se suma al rootFix y el hueso se va de sitio. Con Quaternius
+            // eran 90 grados de mas y la pelvis acababa 1,34 m mas abajo.
             const fileT = b.model.localT;
-            const base = b.parentIndex < 0
-                ? qRotateVecCached(this.rig.rootFix, fileT)
-                : qRotateVecCached(st.q[b.parentContract], fileT);
+            let base;
+            let delta = [dp[0] * inv, dp[1] * inv, dp[2] * inv];
+            if (b.parentIndex < 0) {
+                base = qRotateVecCached(this.rig.rootFix, fileT);
+                if (!this.wrapperIsIdentity) {
+                    // Mundo que produce la escena = wrapperQ * (base + delta).
+                    // Para que sea el que quiere el rig, el local escrito tiene
+                    // que ser wrapperQ^-1 * (base + delta).
+                    const t = qRotateVecCached(this.wrapperInv, base);
+                    const d = qRotateVecCached(this.wrapperInv, delta);
+                    base = t;
+                    delta = d;
+                }
+            } else {
+                base = qRotateVecCached(st.q[b.parentContract], fileT);
+            }
             node.position.set(
-                base[0] + dp[0] * inv,
-                base[1] + dp[1] * inv,
-                base[2] + dp[2] * inv
+                base[0] + delta[0],
+                base[1] + delta[1],
+                base[2] + delta[2]
             );
         }
         return st;

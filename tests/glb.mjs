@@ -52,14 +52,52 @@ export function parseGLB(buffer) {
         meshes: json.meshes || [],
         animations: json.animations || [],
         images: json.images || [],
-        sampler: (i) => {
-            const a = json.accessors[i];
-            const v = json.bufferViews[a.bufferView];
-            const base = (v.byteOffset || 0) + (a.byteOffset || 0);
-            const n = a.count * NUM[a.type];
-            const Arr = COMP[a.componentType];
-            return { array: new Arr(bin.buffer, bin.byteOffset + base, n), count: a.count, type: a.type, componentType: a.componentType };
-        }
+        sampler: makeSampler(json, bin)
+    };
+}
+
+/**
+ * Lector de .gltf con el .bin aparte.
+ *
+ * POR QUE HACE FALTA ADEMAS DEL .glb: no todos los exporters de la industria
+ * producen un .glb binario. El pack CC0 de Quaternius llega como .gltf + .bin
+ * sueltos, y es justamente el modelo con el que hay que comprobar el puente
+ * rig -> Babylon (ver CharacterModel.wrapperTransform). Sin esto, el test que
+ * protege ese bug no se puede escribir.
+ */
+export function parseGLTF(json, bin) {
+    const nodes = (json.nodes || []).map((n, i) => ({
+        index: i,
+        name: n.name || `node_${i}`,
+        children: n.children || [],
+        translation: n.translation || [0, 0, 0],
+        rotation: n.rotation || [0, 0, 0, 1],
+        scale: n.scale || [1, 1, 1],
+        matrix: n.matrix || null
+    }));
+    nodes.forEach((n) => n.children.forEach((c) => { nodes[c].parent = n.index; }));
+    return {
+        json,
+        nodes,
+        skins: json.skins || [],
+        meshes: json.meshes || [],
+        animations: json.animations || [],
+        images: json.images || [],
+        sampler: makeSampler(json, bin)
+    };
+}
+
+function makeSampler(json, bin) {
+    return (i) => {
+        const a = json.accessors[i];
+        const v = json.bufferViews[a.bufferView];
+        const base = (v.byteOffset || 0) + (a.byteOffset || 0);
+        const n = a.count * NUM[a.type];
+        const Arr = COMP[a.componentType];
+        return {
+            array: new Arr(bin.buffer, bin.byteOffset + base, n),
+            count: a.count, type: a.type, componentType: a.componentType
+        };
     };
 }
 
@@ -108,4 +146,17 @@ export function loadGLB(path) {
     return parseGLB(readFileSync(path));
 }
 
-export default { parseGLB, readAccessor, bonesOf, meshBounds, loadGLB };
+/**
+ * Lee un .gltf + su .bin del disco, por nombre de archivo sin extension.
+ * Devuelve { gltf, bones, bounds } con la misma forma que loadGLB, para que los
+ * tests puedan tratar los dos formatos igual.
+ */
+export function loadGLTFPair(basePath) {
+    const gltf = parseGLTF(
+        JSON.parse(readFileSync(basePath + '.gltf', 'utf8')),
+        readFileSync(basePath + '.bin')
+    );
+    return { gltf, bones: bonesOf(gltf), bounds: meshBounds(gltf) };
+}
+
+export default { parseGLB, parseGLTF, readAccessor, bonesOf, meshBounds, loadGLB, loadGLTFPair };

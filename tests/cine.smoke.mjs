@@ -34,6 +34,8 @@ import {
     buildBoneMap, normalizeBoneName, resolveBone, closestContractBone, boneMeta, splitSide,
     ALIASES
 } from '../src/render/BoneMap.js';
+import { wrapperTransform } from '../src/render/CharacterModel.js';
+import { loadGLB, loadGLTFPair } from './glb.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0;
@@ -542,6 +544,108 @@ run('BoneMap · helper de depuracion', () => {
     ok(closestContractBone('basura_total_123') === null, 'un nombre sin relacion devuelve null');
     ok(closestContractBone(undefined) === null, 'undefined no rompe el depurador');
     ok(closestContractBone('') === null, 'cadena vacia no rompe el depurador');
+});
+
+// ===========================================================================
+// EL PUENTE RIG -> BABYLON
+// ---------------------------------------------------------------------------
+// applyPose escribe un LOCAL en cada hueso y Babylon compone encima los padres
+// que haya en el archivo. Para el hueso raiz del rig, el mundo que sale es
+//     W * (rootFix * localT)
+// y el que el rig cree haber puesto es
+//     rootFix * localT
+// Si W no es la identidad, no coinciden. Este bloque comprueba, contra los dos
+// modelos REALES del repo, que el puente coloca la cadera donde el rig dice.
+run('Puente rig->Babylon · el envoltorio del archivo no se cuenta dos veces', () => {
+    const recsDe = (nodes) => nodes.map((n) => ({
+        name: n.name,
+        parentName: n.parent === undefined ? null : nodes[n.parent].name,
+        localT: n.translation || [0, 0, 0],
+        localQ: n.rotation || [0, 0, 0, 1]
+    }));
+    const qmul = (a, b) => [
+        a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+        a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+        a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+        a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]
+    ];
+    const qrot = (q, v) => {
+        const [x, y, z, w] = q, [vx, vy, vz] = v;
+        const tx = 2 * (y * vz - z * vy), ty = 2 * (z * vx - x * vz), tz = 2 * (x * vy - y * vx);
+        return [vx + w * tx + (y * tz - z * ty), vy + w * ty + (z * tx - x * tz), vz + w * tz + (x * ty - y * tx)];
+    };
+    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    const Z_UP = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+
+    const comprobar = (label, nodes) => {
+        const recs = recsDe(nodes);
+        const byName = new Map(recs.map((r) => [r.name, r]));
+        const boneMap = buildBoneMap(recs.map((r) => r.name));
+        ok(boneMap.playable(), `${label}: el modelo cumple el contrato`);
+
+        const pelvis = byName.get(boneMap.map.PELVIS);
+        ok(!!pelvis, `${label}: existe el hueso de la pelvis`);
+
+        const W = wrapperTransform(recs, boneMap.map.PELVIS);
+        const n = W[0] * W[0] + W[1] * W[1] + W[2] * W[2] + W[3] * W[3];
+        const Winv = [-W[0] / n, -W[1] / n, -W[2] / n, W[3] / n];
+        const identidad = Math.abs(W[3]) > 0.9999;
+
+        // Lo que el RIG calcula para la pelvis: rootFix * localT.
+        const rig = qrot(Z_UP, pelvis.localT);
+
+        // SIN la correccion el mundo real es W * (rootFix * localT): el
+        // envoltorio del archivo se SUMA al rootFix. Con envoltorio identidad no
+        // pasa nada (por eso el mannequin nunca lo noto); con uno de 90 grados
+        // la pelvis se va mas de un metro y la malla sale retorcida.
+        const sinCorregir = qrot(W, rig);
+        // CON la correccion el local escrito lleva W^-1 y el mundo sale exacto:
+        // W * (W^-1 * rig) == rig.
+        const conCorreccion = qrot(W, qrot(Winv, rig));
+
+        ok(dist(conCorreccion, rig) < 1e-4,
+            `${label}: con la correccion la pelvis cae donde dice el rig`,
+            `error ${dist(conCorreccion, rig).toFixed(4)} m`);
+
+        if (identidad) {
+            ok(dist(sinCorregir, rig) < 1e-4,
+                `${label}: envoltorio identidad, la correccion no cambia nada`);
+        } else {
+            const err = dist(sinCorregir, rig);
+            ok(err > 0.05,
+                `${label}: sin corregir el error seria real y grande`,
+                `error ${err.toFixed(4)} m`);
+            ok(err > 1,
+                `${label}: el error sin corregir pasa de un metro`,
+                `error ${err.toFixed(4)} m`);
+        }
+
+        return { W, identidad };
+    };
+
+    // El mannequin: envoltorio identidad. Por eso el bug nunca se vio aqui.
+    const m = comprobar('mannequin', loadGLB(join(ROOT, 'assets/characters/mannequin.glb')).nodes);
+    ok(m.identidad,
+        'mannequin: su cadena (Z_UP -> Armature) es identidad, y por eso el bug no lo afectaba',
+        `W = [${m.W.map((v) => v.toFixed(4)).join(', ')}]`);
+
+    // Quaternius: envoltorio de 90 grados. ESTE es el que sale hecho una bola.
+    const base = join(ROOT, 'assets/characters/quaternius-superhero-male/Superhero_Male_FullBody');
+    ok(existsSync(base + '.gltf'), 'el .gltf de Quaternius esta en el repo');
+    ok(existsSync(base + '.bin'), 'el .bin de Quaternius esta en el repo');
+    if (existsSync(base + '.gltf') && existsSync(base + '.bin')) {
+        const { gltf, bones, bounds } = loadGLTFPair(base);
+        ok(gltf.skins.length === 1, 'Quaternius: tiene una skin');
+        ok(bones.length === 65, `Quaternius: 65 huesos en la skin (tiene ${bones.length})`);
+        ok(Math.abs(bounds.size[1] - 1.82) < 0.05,
+            'Quaternius: la malla mide 1,82 m en Y', `Y = ${bounds.size[1].toFixed(3)}`);
+        const q = comprobar('Quaternius', gltf.nodes);
+        ok(!q.identidad,
+            'Quaternius: su envoltorio `root` SI gira, que es justo lo que rompia la postura',
+            `W = [${q.W.map((v) => v.toFixed(4)).join(', ')}]`);
+        const ang = 2 * Math.acos(Math.min(1, Math.abs(q.W[3]))) * 180 / Math.PI;
+        ok(ang > 89 && ang < 91, `Quaternius: el envoltorio son 90 grados (son ${ang.toFixed(1)})`);
+    }
 });
 
 // ===========================================================================

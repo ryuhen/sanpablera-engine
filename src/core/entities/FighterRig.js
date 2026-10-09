@@ -20,16 +20,27 @@
  *                 4 posturas escritas a mano, cualquier `posture` del
  *                 catalogo tiene su pose.
  *   attackPose   .. un golpe en sus 3 fases (startup / active /
- *                 recovery). El brazo o la pierna van a objetivos
- *                 clave interpolados con easing; el torso acompana
- *                 (giro en el puñetazo, volcado atras en la patada).
- *   flinchPose   .. reaccion a un golpe recibido (tropezon/hitstun).
+ *                 recovery), con la silueta de su CONTEXTO. Antes era
+ *                 el mismo puño para de pie, agachado y en el aire.
+ *                 Ver AttackPoses.js, que es donde vive de verdad.
+ *   flinchPose   .. reaccion a un golpe recibido. Delega en
+ *                 HitReactions.js (matriz de 3 alturas x 3 potencias).
  *   downPose     .. cuerpo en el suelo (boca arriba / abajo, con el
  *                 eje del knockdown: 0, 45, 135 o 180 grados).
  *   floatPose    .. aire (juggle, caida): piernas recogidas, sin pies
  *                 plantados porque NO hay suelo bajo los pies.
+ *   groundAttackPose / wakeupPose .. el castigo al rival caido y la
+ *                 levantada. Viven en HitReactions.js.
  *   poseFor      .. el dispatcher: mira un "snapshot" de la FSM (datos
  *                 planos, no la FSM) y elige la de arriba.
+ *
+ * QUE SE SACO DE AQUI Y A DONDE
+ *   Este archivo era el monster que tenia la postura, los golpes y las
+ *   reacciones. Ahora es el DISPATCHER y las tres familias de datos van
+ *   en sus archivos (AttackPoses, HitReactions, y las posturas en
+ *   cine/Stances.js). El motivo no es estetico: los golpes se eligen por
+ *   contexto y las reacciones por la matriz, y cada una tiene sus propias
+ *   pruebas en tests/anim.smoke.mjs.
  *
  * ESTILOS (el abanico de tecnicas)
  *   El mismo estado con un estilo distinto se ve distinto: `opts.style`
@@ -41,6 +52,11 @@ import { stancePose } from '../cine/Stances.js';
 import { createPose, setPos, setEuler } from '../cine/Pose.js';
 import { fk, solveTwoBone, placeFoot } from '../cine/Rig.js';
 import { ease, clamp01, lerp, vlerp } from '../cine/Math3.js';
+import { attackPoseFor, contextOf } from './AttackPoses.js';
+import {
+    hitReactionPose, blendReactionOverStance, groundAttackPose, wakeupPose,
+    HitHeight, HitPower
+} from './HitReactions.js';
 
 /**
  * Postura base por "limbs" (el identificador de pose del catalogo de
@@ -255,8 +271,31 @@ export function posturePose(rig, posture, opts = {}) {
 // ===========================================================================
 
 /**
- * Golpes procedurales. Cada uno define, en espacio de personaje (Y arriba,
- * Z hacia el rival), el objetivo del miembro de golpe en cada fase:
+ * GOLPES LEGACY, por clave de golpe. YA NO LOS USA EL DISPATCHER.
+ *
+ * QUE PASO
+ *   Esta tabla tenia un destino por golpe (la mano, la rodilla) y un SOLO
+ *   cuerpo debajo: el mismo `ATAQUE_LIGERO` salia igual de pie, agachado y en
+ *   el aire, y en el aire ademas clavaba los pies donde estaria el suelo. Se
+ *   sustituyo por AttackPoses.ATTACK_SILHOUETTES, que organiza los golpes por
+ *   FAMILIA (jab / gancho / ascendente / patada / barrido) y le da a cada
+ *   familia las cuatro siluetas de contexto.
+ *
+ * POR QUE SE CONSERVA
+ *   Es la referencia de los numeros concretos que ya estaban ajustados a mano
+ *   (el alcance del jab, la altura del ascendente) y el sitio donde mirar
+ *   cuando una silueta nueva no queda bien. No se borra porque
+ *   `attackPose()` sigue exportada como API, y porque tirar 400 lineas de
+ *   trabajo afinado en el mismo commit que lo deja de usar seria tirar el
+ *   trabajo Y el historico de por que.
+ *
+ * SI ALGO LO USA, MIGRA A `attackPoseFor`
+ *   No se borrara en este commit; en cuanto se verifique que nada lo llama
+ *   (grep de ATTACK_KEYS: solo quedan las dos referencias de aqui y del
+ *   export) se puede eliminar entero.
+ *
+ * Cada golpe define, en espacio de personaje (Y arriba, Z hacia el rival), el
+ * objetivo del miembro de golpe en cada fase:
  *   home     guardia (donde esta antes y despues)
  *   startup  amago (el golpe aun no salio)
  *   active   extension maxima (la hitbox se enciende aqui)
@@ -439,7 +478,11 @@ function phaseScalar(K, phase, t) {
 }
 
 /**
- * Pose de un golpe en su fase actual.
+ * Pose de un golpe en su fase actual, por la tabla LEGACY (ATTACK_KEYS).
+ *
+ * @deprecated Usa `attackPoseFor`, que ademas de esto elige la silueta del
+ *   CONTEXTO (de pie / agachado / aire / suelo). Esta se queda como API para
+ *   quien la llamara por su cuenta.
  *
  * @param rig     rig numerico
  * @param moveKey clave de MoveTable (ATAQUE_LIGERO, ATAQUE_PESADO...)
@@ -543,30 +586,29 @@ export function attackPose(rig, moveKey, phase, t, opts = {}) {
 // ===========================================================================
 
 /**
- * Reaccion a un golpe recibido (hitstun / tropezon / mareado). El
- * torso va hacia atras, la cabeza contrarresta y los brazos se abren
- * para recuperar el equilibrio.
+ * Reaccion a un golpe recibido.
+ *
+ * ANTES ERA UNA SOLA REACCION (mas fuerte / menos fuerte). Ahora delega en
+ * HitReactions, que tiene la matriz de 3 alturas (alto / medio / bajo) por 3
+ * potencias (debil / medio / fuerte): un golpe a la cabeza, uno al torso y uno
+ * a la pierna tienen que verse distintos, y la potencia decide si vuelve a la
+ * guardia de golpe o despacio.
+ *
+ * `opts.move` es el golpe que entro (el frame data de MoveTable). Si no se
+ * pasa, se deduce de `opts.hitLevel` para no romper a quien llame con el
+ * contrato viejo.
  */
 export function flinchPose(rig, hitLevel, opts = {}) {
-    const strong = hitLevel === 'FUERTE';
-    const base = posturePose(rig, {
-        limbs: 'STAGGER',
-        hipY: strong ? 0.70 : 0.78,
-        spinePitch: strong ? -0.42 : -0.30,
-        headPitch: strong ? 0.40 : 0.28
+    const move = opts.move || { hitLevel: hitLevel || 'MEDIO', height: 'MEDIO' };
+    const hit = hitReactionPose(rig, move, opts.t != null ? opts.t : 0, opts);
+    // La postura de combate se pasa YA RESUELTA: es la guardia que el peleador
+    // tenia cuando le pegaron, y la reaccion se le echa encima (ver
+    // HitReactions.blendReactionOverStance, que explica por que es aditiva).
+    const guard = posturePose(rig, {
+        limbs: 'BRACE', hipY: 0.88, spinePitch: 0.06
     }, opts);
-    const pose = base.pose;
-    const state = base.state;
-    // Brazos abiertos y atras: la postura de "me he llevado uno".
-    solveTwoBone(rig, pose, state, {
-        upper: 'UPPERARM_L', lower: 'FOREARM_L',
-        target: [0.46, 1.06, -0.18], pole: [1, 0, 0]
-    });
-    solveTwoBone(rig, pose, state, {
-        upper: 'UPPERARM_R', lower: 'FOREARM_R',
-        target: [-0.46, 1.06, -0.18], pole: [-1, 0, 0]
-    });
-    return { pose, state: fk(rig, pose, state) };
+    const out = blendReactionOverStance(rig, guard, hit);
+    return { pose: out.pose, state: out.state, hit };
 }
 
 /**
@@ -646,29 +688,94 @@ export function floatPose(rig, opts = {}) {
  * Elige la pose para un snapshot de la FSM (datos planos, no la FSM:
  * asi este archivo sigue siendo puro y testeable en Node).
  *
+ * EL ORDEN DE LAS COMPROBACIONES ES EL ORDEN DE LA IMPORTANCIA
+ * ----------------------------------------------------------------------------
+ *   1. GOLPE EN EL SUELO: si el RIVAL esta caido, lo que sale no es un golpe
+ *      normal sino el castigo al del suelo. Va primero porque un snapshot de
+ *      un estado DOWNED tambien lleva el grupo ATTACKING, y si se comprobara
+ *      el ataque despues, el montage se veria como un jab mas.
+ *   2. ATACANDO: con la silueta del CONTEXTO (de pie / agachado / aire / suelo).
+ *      Antes era un attackPose() generico: el mismo jab salia igual en las tres
+ *      posturas y con los pies clavados en el aire.
+ *   3. DOWNED: el cuerpo en el suelo, con la orientacion de la caida.
+ *   4. WAKEUP: la levantada. Va antes que el suelo porque al levantarse el
+ *      estado ya no es DOWNED pero el cuerpo sigue en el suelo: sin esta
+ *      rama el peleador se levantaria de un salto a la guardia.
+ *   5. AIR: en el aire, sin pies plantados.
+ *   6. IMPACT / STUNNED: la matriz de reacciones.
+ *   7. Cualquier otra cosa: la postura del catalogo.
+ *
  * @param snap { phase, groups, posture, attack, attackPhase, attackT,
- *               hitLevel, down }
+ *               hitLevel, down, move, hitT, wakeT, downAttack }
  */
 export function poseFor(rig, snap, opts = {}) {
     const groups = snap.groups || [];
-    const attacking = groups.indexOf('ATTACKING') !== -1 && snap.attack;
-    if (attacking) {
-        return attackPose(rig, snap.attack, snap.attackPhase || 'RECOVERY', snap.attackT || 0, opts);
+    const inAttack = groups.indexOf('ATTACKING') !== -1 && snap.attack;
+
+    // --- 1. castigo al rival caido ------------------------------------
+    if (snap.downAttack && inAttack) {
+        const kind = snap.downAttack === true ? 'PIE' : snap.downAttack;
+        return groundAttackPose(rig, kind, snap.attackPhase || 'ACTIVE', snap.attackT || 0, opts);
     }
-    if (snap.phase === 'DOWNED' || snap.down) {
+
+    // --- 2. golpe con la silueta del contexto -------------------------
+    if (inAttack) {
+        const ctx = contextOf(snap);
+        const base = posturePose(rig, {
+            limbs: 'BRACE', hipY: ctx === 'CROUCH' ? 0.52 : 0.88, spinePitch: 0.10
+        }, opts);
+        return attackPoseFor(rig, snap.attack, ctx,
+            snap.attackPhase || 'RECOVERY', snap.attackT || 0,
+            Object.assign({}, opts, {
+                posture: base,
+                silhouette: snap.silhouette
+            }));
+    }
+
+    // --- 3. cuerpo en el suelo ----------------------------------------
+    if (snap.phase === 'DOWNED' || groups.indexOf('DOWNED') !== -1) {
         return downPose(rig, snap.down, opts);
     }
-    if (snap.phase === 'AIR') {
+
+    // --- 4. levantada --------------------------------------------------
+    // El estado WAKEUP no lleva DOWNED, asi que sin esta rama el peleador se
+    // levantaria de golpe: la pose se teletransportaria del suelo a la
+    // guardia y el wakeup con invulnerabilidad pareceria un fallo.
+    if (groups.indexOf('WAKEUP') !== -1 || snap.phase === 'WAKEUP') {
+        return wakeupPose(rig, snap.wakeT != null ? snap.wakeT : 0, snap.down, opts);
+    }
+
+    // --- 5. aire -------------------------------------------------------
+    if (snap.phase === 'AIR' || groups.indexOf('AIRBORNE') !== -1) {
         return floatPose(rig, opts);
     }
+
+    // --- 6. impacto ----------------------------------------------------
     if (groups.indexOf('IMPACT') !== -1 || groups.indexOf('STUNNED') !== -1) {
-        return flinchPose(rig, snap.hitLevel, opts);
+        return flinchPose(rig, snap.hitLevel, Object.assign({}, opts, {
+            move: snap.move || null, t: snap.hitT
+        }));
     }
+
+    // --- 7. lo de siempre ---------------------------------------------
     return posturePose(rig, snap.posture, opts);
 }
 
+export {
+    // Reexportadas desde sus modulos para que quien importa FighterRig tenga
+    // el Dispatcher completo. Las tablas de silueta y de reacciones viven en
+    // sus archivos (AttackPoses / HitReactions) porque son cosas distintas:
+    // unas eligen COMO se ve un golpe y otras COMO se recibe.
+    attackPoseFor, contextOf,
+    hitReactionPose, blendReactionOverStance, groundAttackPose, wakeupPose,
+    HitHeight, HitPower
+};
+
 export default {
     posturePose, attackPose, flinchPose, downPose, floatPose, poseFor, locoPose,
+    attackPoseFor, contextOf,
+    hitReactionPose, blendReactionOverStance, groundAttackPose, wakeupPose,
+    HitHeight, HitPower,
     ATTACK_KEYS, LIMB_SPECS, STYLE_MODS, LOCO_POSTURES, ATTACK_LOCO_MODS,
     STANCE_ARMS
 };
