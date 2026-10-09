@@ -740,6 +740,98 @@ function fitCamera(dt) {
     camera.radius += (target - camera.radius) * (1 - Math.exp(-dt * 3));
 }
 
+/**
+ * Traduce el estado de la FSM de una entidad a la POSTURA que entiende la capa
+ * de choque (core/clinch.js). Es un PUENTE, no una logica: si el motor anade
+ * un estado nuevo, se toca solo esta funcion.
+ *
+ * OJO: esto lee el estado de la FSM del frame ANTERIOR (la entidad acaba de
+ * actualizarse, asi que ya es el nuevo). Para el choque da igual: el impacto
+ * ocurre en el mismo frame que el cambio de estado.
+ */
+function postureOf(entity) {
+    const fsm = entity.fsm;
+    const id = fsm ? fsm.stateId : null;
+    if (id == null) return 'NEUTRAL';
+
+    // Se comparan los grupos/bandas de fase, no los ids sueltos: asi no hay que
+    // mantener una lista de ids aqui que se quede vieja.
+    const phase = fsm.state ? fsm.state.phase : null;
+    const group = fsm.state ? fsm.state.group : null;
+
+    if (phase === 'AIR') return 'AIRBORNE';
+    if (phase === 'DOWNED') return 'DOWNED';
+    if (group === 'GRAPPLE') return 'GRAPPLE';
+
+    // De pie: se distingue por la velocidad real de la entidad, que es lo que
+    // distingue correr de andar aunque la FSM no lo diga.
+    const sp = Math.hypot(entity.vx || 0, entity.vz || 0);
+    if (sp > 4.0) return 'DASH';
+    if (sp > 1.6) return 'RUN';
+    if (sp > 0.15) return 'WALK';
+
+    // Quieto: de pie o agachado, segun la postura de combate que tenga puesta.
+    return entity.stance && entity.stance.id === 'CROUCH' ? 'CROUCH' : 'NEUTRAL';
+}
+
+/**
+ * RESUELVE EL CHOQUE ENTRE LOS DOS CUERPOS.
+ *
+ * Solo mira a los dos luchadores (no la utileria). Si el veredicto dice que no
+ * hay choque, no hace nada. Si lo hay, aplica el dano y el empuje.
+ *
+ * @param {number} dt
+ * @param {object} input  el input del frame, para leer los botones del instante
+ */
+function resolveBodyClash(dt, input) {
+    if (entities.length < 2) return;
+
+    const a = entities[0];
+    const b = entities[1];
+
+    // Radio de contacto: dos cuerpos se tocan cuando estan mas cerca que la
+    // suma de sus volumenes. Es el mismo criterio que usa MIN_SPACING, pero
+    // aqui NO se separan: se resuelve que pasa en el choque.
+    const dx = b.fighter.x - a.fighter.x;
+    const dz = b.fighter.z - a.fighter.z;
+    if (Math.hypot(dx, dz) > OPPONENT_HULL * 2) return;   // ni se tocan
+
+    const v = resolveClash({
+        x: a.fighter.x, z: a.fighter.z,
+        posture: postureOf(a),
+        attack: 'NONE',
+        input: botonDelInstante(input)
+    }, {
+        x: b.fighter.x, z: b.fighter.z,
+        posture: postureOf(b),
+        attack: 'NONE',
+        input: 'NONE'
+    });
+
+    if (!v.isClash || v.result === 'ABSORB') return;
+
+    if (v.damageA) a.fighter.health = Math.max(0, a.fighter.health - v.damageA);
+    if (v.damageB) b.fighter.health = Math.max(0, b.fighter.health - v.damageB);
+
+    console.log('choque: ' + v.result + ' (' + v.reason + ')');
+}
+
+/**
+ * Que boton esta pulsado EN EL FRAME DEL CHOQUE (la explotacion).
+ *
+ * Las claves de `input.pressed` son los ids de `SPF.Intent`, que son numeros,
+ * NO nombres: hay que buscar por el id o esto no detecta nunca nada.
+ */
+function botonDelInstante(input) {
+    if (!input || !input.pressed) return 'NONE';
+    const p = input.pressed;
+    if (p[Intent.ATAQUE_LIGERO]) return 'PUNCH';
+    if (p[Intent.ATAQUE_PESADO]) return 'KICK';
+    if (p[Intent.ACCION]) return 'ACTION';
+    if (p[Intent.GUARDIA]) return 'GUARD';
+    return 'NONE';
+}
+
 /** Un frame de juego. */
 function render() {
     // OJO: getDeltaTime() devuelve MILISEGUNDOS en Babylon. Tratarlo
