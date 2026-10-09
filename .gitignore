@@ -18,3 +18,11 @@ Acode
 # Ignore OS-specific files
 .DS_Store
 Thumbs.db
+
+# Salidas de pruebas y bitacoras de ejecucion. Los .tmp.txt se tragan cientos
+# de MB de consola (una de las pruebas del inspector escribe 300 MB), asi que
+# NUNCA deben acabar en el repo.
+tmp_*.txt
+*.tmp
+npm-debug.log*
+yarn-error.log*
