@@ -56,6 +56,7 @@ import {
 } from '../cine/Pose.js';
 import { fk, solveTwoBone } from '../cine/Rig.js';
 import { clamp01, lerp, ease } from '../cine/Math3.js';
+import { registerTable, merge, deepFreeze } from '../anim/Overrides.js';
 
 // ===========================================================================
 // EL VOCABULARIO
@@ -228,11 +229,30 @@ export function heightOf(move) {
     return move.height;
 }
 
+/**
+ * REGISTRO PARA EL INSPECTOR (core/anim/Overrides.js).
+ *
+ * `liveReactions()` devuelve la matriz CON los overrides aplicados. La tabla
+ * original no se toca: sin parche, `merge()` devuelve la referencia intacta y
+ * el motor se comporta igual que en las pruebas. Lo comprueba
+ * `tests/overrides.smoke.mjs`.
+ *
+ * `TABLE` opcional para pasar una matriz de prueba sin tocar la real.
+ */
+export function liveReactions(TABLE) {
+    return TABLE || merge('HIT_REACTIONS');
+}
+
+// En profundo, no solo el primer nivel: los arrays de las filas (`spine`,
+// `arms`, `legs`) tienen que quedarse quietos tambien. Ver `deepFreeze`.
+registerTable('HIT_REACTIONS', deepFreeze(HIT_REACTIONS));
+
 /** La fila de la matriz para un golpe. Siempre devuelve algo valido. */
-export function reactionFor(move) {
+export function reactionFor(move, TABLE) {
+    const T = TABLE || liveReactions();
     const h = heightOf(move);
     const p = powerOf(move);
-    const row = HIT_REACTIONS[h] || HIT_REACTIONS[HitHeight.MEDIO];
+    const row = T[h] || T[HitHeight.MEDIO];
     return row[p] || row[HitPower.MEDIO];
 }
 
@@ -266,9 +286,12 @@ export function impactKindOf(move) {
  */
 export function hitReactionPose(rig, move, t, opts = {}) {
     const tt = clamp01(t);
-    const height = heightOf(move);
-    const power = powerOf(move);
-    const row = HIT_REACTIONS[height] || HIT_REACTIONS[HitHeight.MEDIO];
+    const height = opts.height || heightOf(move);
+    const power = opts.power || powerOf(move);
+    // La matriz se lee por `liveReactions()`: con el inspector cerrado es la
+    // original; abierto, la parcheada.
+    const T = opts.reactions || liveReactions();
+    const row = T[height] || T[HitHeight.MEDIO];
     const R = row[power] || row[HitPower.MEDIO];
 
     // El impacto NO entra de golpe: el cuerpo primero recibe y luego se
@@ -495,7 +518,7 @@ const lerp3 = (a, b, t) => [
  * POR QUE NO ES "UNA POSTURA" COMO LAS DEMAS
  *   Las otras poses deciden donde esta el cuerpo ahora. Esta decide COMO SE
  *   LLEGA. El jugador ve al rival levantarse y lee de ahi si se puede volver a
- *   atacar o no, asi que tiene que enseñar la力学: se apoya en un codo, se
+ *   atacar o no, asi que tiene que ENSENAR la mecanica: se apoya en un codo, se
  *   encoge una rodilla, se empuja con el brazo, y ya esta de pie. Si sale
  *   teletransportandose del suelo a la guardia, el wakeup con invulnerabilidad
  *   parece un bug y el bucle de combos se pierde.

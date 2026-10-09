@@ -245,20 +245,26 @@ export function allWords() {
  * @returns {string}
  */
 export function unescapeTag(word) {
-    // OJO con el orden, que es lo unico delicado de esta funcion.
+    // OJO con dos cosas, que son lo unico delicado de esta funcion.
     //
-    // Un replace por vocal, en cadena, se pisa a si mismo: al resolver `~N` a
-    // una "ñ", el paso de `~o` ya no puede volver a tocar esa letra (bien), pero
-    // en sentido inverso, resolver `~A` a "á" y luego pasar `~a` encuentra la
-    // tilde que ya no existe (tambien bien)... el problema de verdad es que la
-    // vocal acentuada que sale vuelve a entrar en el patron del siguiente paso.
-    // Por eso se resuelve TODO en una sola pasada, con un solo replace: cada
-    // "letra~" del original se lee una vez y se escribe una vez, y la salida ya
-    // no vuelve a entrar en ningun patron.
+    // 1) UNA SOLA PASADA. Un replace por vocal, en cadena, se pisa a si mismo:
+    //    la vocal acentuada que sale puede volver a entrar en el patron del
+    //    siguiente paso. Resolviendo todo con un unico replace, cada "letra~"
+    //    del original se lee una vez y se escribe una vez, y la salida ya no
+    //    vuelve a entrar en ningun patron.
+    //
+    // 2) RESPETA LAS MAYUSCULAS. El grafiti va en mayusculas, y `CO~NIZA`
+    //    tiene que salir "COÑIZA", no "COñIZA": una enye minuscula en mitad de
+    //    una palabra en mayusculas se lee como un fallo, no como una tilde.
+    const ACENTOS = {
+        o: ['\u00f3', '\u00d3'], a: ['\u00e1', '\u00c1'], e: ['\u00e9', '\u00c9'],
+        i: ['\u00ed', '\u00cd'], u: ['\u00fa', '\u00da'], n: ['\u00f1', '\u00d1']
+    };
     return String(word || '')
-        .replace(/~([oaeiun])/gi, (m, letra) => ({
-            o: '\u00f3', a: '\u00e1', e: '\u00e9', i: '\u00ed', u: '\u00fa', n: '\u00f1'
-        })[letra.toLowerCase()])
+        .replace(/~([oaeiun])/gi, (m, letra) => {
+            const par = ACENTOS[letra.toLowerCase()];
+            return par[letra === letra.toUpperCase() ? 1 : 0];
+        })
         .replace(/~/g, '');   // cualquier otra ~ se va
 }
 
@@ -279,10 +285,15 @@ export function unescapeTag(word) {
  * @param {string[]} [opts.paises] paises que puede usar (undefined = todos)
  * @returns {Array<{word,pais,roll,tone}>} `count` palabras, sin repetir
  */
-export function pickWords({ seed = 1, count = 9, weights = null, paises = null } = {}) {
+export function pickWords({ seed = 1, count = 9, weights = null, paises = null, juego = true } = {}) {
+    // OJO con el origen del conjunto. Sin `paises`, el conjunto sale de
+    // `allWords()`, que mezcla la jerga de calle CON las palabras del juego
+    // (SANPABLERA, DOJO...): por eso el tope de esta funcion es
+    // `allWords().length`, y no `count()`, que solo cuenta la calle. Con
+    // `juego: false` sale solo de la calle y el tope pasa a ser `count()`.
     const pool = paises && paises.length
         ? paises.flatMap((p) => wordsOf(p))
-        : allWords();
+        : (juego ? allWords() : wordsOf());
     if (!pool.length) return [];
     // No se puede pedir mas de lo que hay: el bucle de abajo se pararia por
     // `candidates` vacio y devolveria menos de lo pedido, que es lo correcto,

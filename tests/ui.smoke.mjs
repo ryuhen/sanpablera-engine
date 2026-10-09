@@ -65,10 +65,27 @@ section('1. Lexiconario · la jerga del muro');
 
     // La palabra con "Co~Niza" tiene que salir con la o acentuada de verdad:
     // es lo que la brocha pinta.
-    check('el escape ~o se convierte en una o acentuada',
-        lex.unescapeTag('CO~NIZA') === 'COÑIZA', lex.unescapeTag('CO~NIZA'));
-    check('el escape ~n se convierte en enye',
-        lex.unescapeTag('PA~NANO') === 'PAÑANO', lex.unescapeTag('PA~NANO'));
+    // Se comparan los CODEPOINTS, no los literales: este archivo se lee como
+    // CP1252 en algunos editores de Windows, y un "Ñ" escrito a mano llega al
+    // Node como otra cosa y el test falla sin que el codigo este mal. Con los
+    // codepoints no hay forma de que se confunda.
+    const cp = (s) => Array.from(s).map((c) => c.codePointAt(0).toString(16)).join(' ');
+    check('CO~NIZA sale con enye MAYUSCULA (codepoint d1), no minuscula',
+        cp(lex.unescapeTag('CO~NIZA')) === '43 4f d1 49 5a 41', cp(lex.unescapeTag('CO~NIZA')));
+    check('PA~NANO sale con enye mayuscula',
+        cp(lex.unescapeTag('PA~NANO')) === '50 41 d1 41 4e 4f', cp(lex.unescapeTag('PA~NANO')));
+    check('una vocal en minuscula sale acentuada en minuscula (f3 = o)',
+        cp(lex.unescapeTag('c~o')) === '63 f3', cp(lex.unescapeTag('c~o')));
+    check('el escape ~a en mayusculas da A mayuscula acentuada (c1)',
+        cp(lex.unescapeTag('E~A~DE')) === '45 c1 44 45', cp(lex.unescapeTag('E~A~DE')));
+    // `~N` es enye, NO una N acentuada: por eso "NO~PE" no lleva tilde ninguna,
+    // es un caso de paso (el `~` se come y la palabra queda "NOPE").
+    check('NO~PE se queda sin tilde (la ~N era una enye, no una N acentuada)',
+        cp(lex.unescapeTag('NO~PE')) === '4e 4f 50 45', cp(lex.unescapeTag('NO~PE')));
+    check('MALA~E se acentua aunque la letra no sea vocal',
+        cp(lex.unescapeTag('MALA~E')) === '4d 41 4c 41 c9', cp(lex.unescapeTag('MALA~E')));
+    check('una tilde suelta se quita y no rompe la palabra',
+        cp(lex.unescapeTag('A~QUI')) === '41 51 55 49', cp(lex.unescapeTag('A~QUI')));
     check('una tilde suelta se quita sin romper nada',
         lex.unescapeTag('A~QUI') === 'AQUI', lex.unescapeTag('A~QUI'));
 
@@ -112,17 +129,32 @@ section('1. Lexiconario · la jerga del muro');
     // Pocas palabras por grafitero: si pide mas de las que hay, no debe reventar.
     // Pedir mas de las que hay: tiene que devolver TODAS las del diccionario
     // (las palabras del juego van aparte), ni una mas ni una menos.
-    // Pedir mas de las que hay: tiene que devolver TODAS, ni una mas ni una
-    // menos. `pickWords` saca del diccionario de calle; las palabras del juego
-    // son un conjunto aparte (`allWords` las une), asi que el tope aqui es
-    // `count()`, no `allWords().length`.
-    const todas2 = lex.pickWords({ seed: 1, count: 500 });
-    check('pedir de mas devuelve todas las de calle', todas2.length === lex.count(),
-        { pedidas: 500, recibidas: todas2.length, enDiccionario: lex.count() });
+    // Pedir mas de las que hay tiene que devolver TODAS, ni una mas ni una menos.
+    // SIN paises, `pickWords` saca de `allWords()` (calle + juego), asi que el
+    // tope es `allWords().length`. Con `juego: false` sale solo de la calle y el
+    // tope pasa a ser `count()`. Los dos caminos se comprueban.
+    const tope = lex.allWords().length;
+    check('el conjunto completo cabe en el tope',
+        tope === lex.count() + lex.GAME_WORDS.length,
+        { allWords: tope, calle: lex.count(), juego: lex.GAME_WORDS.length });
+
+    const todas2 = lex.pickWords({ seed: 1, count: 9999 });
+    check('pedir de mas devuelve el conjunto entero, sin pasarse',
+        todas2.length === tope, { recibidas: todas2.length, tope });
     check('y no repite ninguna',
         new Set(todas2.map((w) => w.word)).size === todas2.length);
-    check('el tope no se pasa nunca',
-        lex.pickWords({ seed: 1, count: 500 }).length <= lex.count());
+
+    const soloCalle = lex.pickWords({ seed: 1, count: 9999, juego: false });
+    check('con juego:false sale solo la calle',
+        soloCalle.length === lex.count(),
+        { recibidas: soloCalle.length, calle: lex.count() });
+    check('y ninguna es palabra del juego',
+        soloCalle.every((w) => !lex.GAME_WORDS.some((g) => g.word === w.word)));
+
+    // El bucle tiene que terminar siempre: el `i < objetivo*6 + pool.length` es
+    // lo que evita que pedir 9999 cuelgue el proceso.
+    check('el tope no se pasa con ninguna semilla',
+        [0, 1, 7, 42, 999].every((s) => lex.pickWords({ seed: s, count: 9999 }).length <= tope));
     check('sin palabras de ese pais devuelve vacio', lex.pickWords({ seed: 1, count: 5, paises: ['ZZ'] }).length === 0);
 }
 
@@ -134,10 +166,18 @@ section('2. Grafiteros · quien pinta el muro');
         writers.WRITERS.length >= 5 && writers.WRITERS.length <= 6,
         writers.WRITERS.length);
 
+    // Toda paleta declarada tiene que existir de verdad. Antes `paletteOf` caia
+    // a una paleta por defecto y un typo en la clave pasaba desapercibido.
+    for (const w of writers.WRITERS) {
+        check(`${w.id}: la paleta "${w.paleta}" existe de verdad`,
+            writers.paletteOf(w) !== null);
+    }
+    check('una paleta inexistente devuelve null en vez de callarse',
+        writers.paletteOf({ id: 'X', paleta: 'NO_EXISTE' }) === null);
+
     for (const w of writers.WRITERS) {
         check(`${w.id}: tiene id, nombre, de y bio`,
             !!(w.id && w.nombre && w.de && w.bio));
-        check(`${w.id}: la paleta existe`, !!writers.paletteOf(w));
         check(`${w.id}: el rollo es del vocabulario`,
             Object.keys(w.rolls || {}).every((r) => lex.ROLLS.includes(r)),
             Object.keys(w.rolls || {}));

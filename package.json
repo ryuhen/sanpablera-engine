@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/hud.smoke.mjs && node tests/stamina.smoke.mjs && node tests/fsm.smoke.mjs && node tests/design.smoke.mjs && node tests/cine.smoke.mjs && node tests/air.smoke.mjs && node tests/anim.smoke.mjs && node tests/render.smoke.mjs"
+    "test": "node tests/hud.smoke.mjs && node tests/stamina.smoke.mjs && node tests/fsm.smoke.mjs && node tests/design.smoke.mjs && node tests/ui.smoke.mjs && node tests/cine.smoke.mjs && node tests/air.smoke.mjs && node tests/anim.smoke.mjs && node tests/render.smoke.mjs && node tests/overrides.smoke.mjs"
   },
   "dependencies": {
     "babylonjs": "^9.23.0",

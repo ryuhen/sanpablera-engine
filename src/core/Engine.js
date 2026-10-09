@@ -45,6 +45,7 @@ import SelectScreen from '../ui/SelectScreen.js';
 import StageSelect from '../ui/StageSelect.js';
 import { loadCharacterModel } from '../render/CharacterModel.js';
 import { Cape } from '../render/ClothMesh.js';
+import { AnimInspector } from './anim/Inspector.js';
 import { InputMapper } from './entities/InputMapper.js';
 import FighterEntity, { nextStance } from './entities/FighterEntity.js';
 import { StaminaGauge } from './combat/Stamina.js';
@@ -509,6 +510,9 @@ const IDLE_INPUT = Object.freeze({
 
 let ui = null;
 let hud = null;
+/** El inspector de animaciones (F2). Vive fuera del combat loop: cuando esta
+ *  abierto, el bucle le cede el control de la pose. */
+let inspector = null;
 
 /**
  * Basis de la camara en el suelo: "adelante" es la proyeccion del
@@ -700,12 +704,66 @@ async function boot() {
         }))
     });
 
+    // --- INSPECTOR DE ANIMACIONES (F2) ------------------------------------
+    //
+    // Se construye UNA vez con el modelo del P1. Cuando esta abierto, el bucle
+    // de render deja de avanzar a las entidades y llama a `inspector.tick()`, que
+    // escribe la pose que se esta viendo. Los peleadores siguen en pantalla (no
+    // se borran), asi que se ve el golpe con el RIVAL al lado, que es la mitad
+    // de comprobar un golpe: un jab mas largo solo se ve con alguien a quien
+    // llegue.
+    //
+    // POR QUE UN SOLO MODELO Y NO LOS DOS
+    //   El inspector escribe la pose del P1. El P2 se queda con la suya (la
+    //   ultima del combate), y eso es lo que hace util tenerlos: se ve el
+    //   alcance y la altura RELATIVOS al rival, sin tener que fabricar un
+    //   maniqui de altura fija que no dice nada.
+    inspector = new AnimInspector({
+        model: (fighters[0] && fighters[0].model) || null,
+        onApply: (res) => {
+            // La capa se actualiza con la FK de la pose del inspector: si no,
+            // la capa se queda en la pose anterior mientras el cuerpo se mueve,
+            // que es el sintoma de "la capa va un frame por detras".
+            const m = fighters[0];
+            if (m && m.model) {
+                m.model.place(m.x, m.z, m.facing);
+                if (inspector.capeRef) inspector.capeRef.update(1 / 60, res.state);
+            }
+        },
+        onZoom: (delta) => {
+            // Zoom de la camara con ctrl+rueda, con tope. El tope importa: sin
+            // el, `camera.radius` puede llegar a 0 y la escena se ve desde
+            // dentro del suelo.
+            const MIN = 1.1, MAX = 12;
+            camera.radius = Math.max(MIN, Math.min(MAX, camera.radius * (delta > 0 ? 1.15 : 1 / 1.15)));
+            // Se guarda el radio como preferencia mientras el inspector esta
+            // abierto: si `fitCamera` siguiera corriendo, devolveria el radio
+            // a su valor canonico en cuanto se moviera un peleador y el zoom
+            // se perderia a los dos segundos.
+            inspector.camBias = camera.radius;
+        },
+        onClose: () => { inputMapper.reset(); ui.router.releaseAll(); }
+    });
+    if (fighters[0] && entities[0]) inspector.capeRef = entities[0].cape || null;
+
     // --- Atajo al menu de controles ---------------------------------------
     // F1 abre el configurador de teclado y mando. Mientras esta abierto el
     // juego queda congelado (el router desactiva el teclado), asi que no hace
     // falta pausar la escena a mano.
+    //
+    // F2 abre el inspector de animaciones. Mismo criterio: abrirlo suelta el
+    // teclado, para que el WASD no mueva al peleador mientras estas mirando el
+    // jab.
     let controlsOpen = false;
     window.addEventListener('keydown', (e) => {
+        if (e.code === 'F2') {
+            e.preventDefault();
+            const abriendo = !inspector.isOpen();
+            if (abriendo) { ui.router.releaseAll(); inputMapper.reset(); }
+            inspector.toggle();
+            if (!inspector.isOpen()) { ui.router.releaseTouch(); inputMapper.reset(); }
+            return;
+        }
         if (e.code !== 'F1' || controlsOpen) return;
         e.preventDefault();
         controlsOpen = true;
@@ -746,7 +804,14 @@ function fitCamera(dt) {
     const locked = entities.some(e => e.targetLock);
     const base = locked ? 3.0 : 4.2;
     const target = Math.max(base, span * 0.9 + 3.0);
-    camera.radius += (target - camera.radius) * (1 - Math.exp(-dt * 3));
+
+    // Con el inspector abierto manda el zoom manual (ctrl+rueda). Sin esto,
+    // `fitCamera` devolveria el radio a su valor canonico en cada frame y el
+    // zoom se perderia al instante. Al cerrar el inspector, el ajuste automatico
+    // vuelve a mandar solo.
+    const destino = (inspector && inspector.isOpen() && inspector.camBias)
+        ? inspector.camBias : target;
+    camera.radius += (destino - camera.radius) * (1 - Math.exp(-dt * 3));
 }
 
 /**
@@ -884,6 +949,30 @@ function render() {
         return;
     }
 
+    // --- INSPECTOR DE ANIMACIONES (F2) ---------------------------------
+    // Cuando esta abierto, el combate NO avanza y el inspector escribe la pose.
+    //
+    // POR QUE SE SACA ANTES DEL INPUT Y NO AL FINAL DEL BUCLE
+    //   Si el combate avanzara un frame mas con cada pulsacion de F2, el
+    //   estado de la FSM avanzaria mientras se mira un fotograma: al cerrar el
+    //   inspector el combate estaria medio segundo por delante de donde se
+    //   dejo. Es el mismo motivo por el que el menu de controles congela el
+    //   juego, pero aqui el congelado es TOTAL (no solo el teclado), porque lo
+    //   que se mira es un instante, no una partida.
+    //
+    // El HUD y la camara siguen vivos: el HUD para ver la vida, la camara para
+    // poder girar alrededor del golpe que se esta viendo.
+    if (inspector && inspector.isOpen()) {
+        // La camara sigue viva: sin esto el objetivo se queda congelado en
+        // donde estaba al abrir el panel, y si el rival esta lejos la pose se
+        // ve fuera de encuadre.
+        fitCamera(dt);
+        inspector.tick(dt);
+        if (hud) hud.tick(dt);
+        scene.render();
+        return;
+    }
+
     // --- Input (una lectura por frame) ----------------------------------
     const cam = cameraGroundBasis();
     const player = entities[0];
@@ -958,9 +1047,16 @@ if (document.readyState === 'loading') {
 // Para depurar desde la consola del navegador.
 window.SANPABLERA = { engine, scene, camera, fighters, entities, world, inputMapper, loading, ground, hud };
 
-// El router se expone aparte porque `ui` todavia es null aqui (se crea al
-// final de boot). Sirve para inspeccionar que tecla se ha pulsado:
+// El inspector se expone por getter porque todavia es null aqui (se crea al
+// final de boot):
+window.SANPABLERA.getInspector = () => inspector;
 window.SANPABLERA.getRouter = () => (ui ? ui.router : null);
+
+/** Abre o cierra el inspector de animaciones (atajo a la tecla F2). */
+window.SANPABLERA.anim = function () {
+    if (inspector) inspector.toggle();
+    return !!(inspector && inspector.isOpen());
+};
 
 // Helpers de debug: probar barras y golpes en tiempo real sin esperar
 // al input tactil.

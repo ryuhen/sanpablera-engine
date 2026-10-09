@@ -23,6 +23,20 @@
  *   del update().
  * ============================================================================
  */
+// El destino del namespace. Se declara FUERA de la IIFE y no dentro por una
+// razon concreta: el `export default` del final del archivo necesita alargar el
+// nombre, y dentro de la IIFE `SPF` es una constante local que no se ve desde
+// fuera. Con `SPF` declarado aqui, tanto la IIFE como el export se refieren al
+// MISMO objeto.
+//
+// La version anterior de esta nota decia que el export funcionaba. No lo hacia:
+// `const SPF = ...` estaba dentro de `(function(global){...})(window)`, asi que
+// el `export default SPF` de la ultima linea era un `ReferenceError` siempre que
+// el archivo se cargaba como modulo ES (que es como lo carga el motor). Nadie
+// lo habia visto porque las pruebas usan el mismo patron de namespace global
+// y ningun modulo Node importaba Constants.js todavia.
+const RAIZ = (typeof window !== 'undefined' ? window : globalThis);
+
 (function (global) {
     'use strict';
 
@@ -675,9 +689,12 @@
         return FacingAxis.PIES_A_RIVAL - axis;
     };
 
-} )(typeof window !== 'undefined' ? window : globalThis);
+} )(RAIZ);
 
 // El archivo mantiene su diseño de namespace global (SPF en window) para
 // poder cargarse tambien como script clásico, pero expone el namespace como
 // export por defecto para que el resto del motor lo importe como módulo ES.
-export default SPF;
+// Se exporta el MISMO objeto que la IIFE ha rellenado, no una copia: el motor
+// lee `SPF.State` por un lado y lo escribe por otro, y si fueran dos objetos
+// distintos los estados del motor no serian los que ve el resto del codigo.
+export default RAIZ.SPF;
