@@ -75,7 +75,7 @@ export class InputMapper {
         /** Reloj del mapper (avanza con `tick`, se congela con el hitstop
          *  porque el engine no llama a tick mientras dura). */
         this.time = 0;
-        this.prev = { attack1: false, attack2: false, block: false, action: false, up: false };
+        this.prev = { attack1: false, attack2: false, block: false, action: false, up: false, down: false };
         this.dirHistory = [];          // [{ dir, time }] ultimas pulsaciones de eje
         this._lastDirKey = null;
         this.lastUpEdge = -Infinity;
@@ -156,7 +156,17 @@ export class InputMapper {
             //
             // Se emite SIEMPRE, tambien con el stick suelto: entonces
             // sale 'N' y la matriz responde con el golpe base del boton.
-            dir8: quantizeDirection(side, fwd)
+            dir8: quantizeDirection(side, fwd),
+            // La capa de guardia. `guard` es lo que convierte la cruceta de
+            // 8 direcciones en un mando de 2 vias (arriba salta, abajo se
+            // agacha) y lo que da a los botones su significado propio
+            // (puno y patada dejan de ser la matriz y pasan a ser agarre o
+            // tecnica). Se expone como booleano porque lo consultan varios
+            // sitios y porque queda mas claro que `held[GUARDIA]`.
+            guard: held[Intent.GUARDIA] === true,
+            // Doble toque ABAJO: la senal de "tirarse al suelo". Va aparte
+            // del `dash` a proposito (ver mas abajo).
+            doubleDown: false
         };
 
         // ---- arista de direccion + doble toque (dash) ----
@@ -186,6 +196,25 @@ export class InputMapper {
         }
         input.airSeqReady = t < this.airSeqReadyUntil;
 
+        // ---- doble ABAJO: la senal de "tirarse al suelo" ----
+        //
+        // Se separa del `dash` a proposito. El doble toque de ABAJO no es un
+        // dash: es una peticion de suelo (pecho a tierra, gateo, rodada), que
+        // se combina con la guardia y la accion. Si compartiera camino con
+        // el dash habria que decidir cual de los dos gana cuando coinciden, y
+        // se perderian los dos.
+        //
+        // El reloj es propio (`lastDownEdge`) y no el del historial de ejes:
+        // el historial guarda la ultima pulsacion de CADA direccion, asi que
+        // el `dirHistory` no distingue "he vuelto a pulsar abajo" de "sigo
+        // manteniendo abajo".
+        if (input.down && !this.prev.down) {
+            if ((t - this.lastDownEdge) <= DOUBLE_TAP_WINDOW) {
+                input.doubleDown = true;
+            }
+            this.lastDownEdge = t;
+        }
+
         // ---- ACCION: arista, sostenida y "recien pulsada" ----
         if (b.action && !this.prev.action) {
             input.actionEdge = true;
@@ -203,9 +232,14 @@ export class InputMapper {
         }
 
         // ---- memoria de aristas ----
+        // `down` TIENE que estar aqui. Si no, `this.prev.down` se queda en
+        // false para siempre, `input.down && !this.prev.down` da verdad en
+        // cada frame con abajo pulsado, y mantener el pulgar abajo se cuenta
+        // como un doble toque: el peleador se tiraria al suelo solo.
         this.prev = {
             attack1: !!b.attack1, attack2: !!b.attack2,
-            block: !!b.block, action: !!b.action, up: input.up
+            block: !!b.block, action: !!b.action,
+            up: input.up, down: input.down
         };
         this.lastSnapshot = input;
         return input;
@@ -213,10 +247,14 @@ export class InputMapper {
 
     /** Reinicia la memoria de aristas (para cortes de escena / reinicio). */
     reset() {
-        this.prev = { attack1: false, attack2: false, block: false, action: false, up: false };
+        this.prev = {
+            attack1: false, attack2: false, block: false, action: false,
+            up: false, down: false
+        };
         this.dirHistory.length = 0;
         this._lastDirKey = null;
         this.lastUpEdge = -Infinity;
+        this.lastDownEdge = -Infinity;
         this.airSeqReadyUntil = -Infinity;
         this.actionSince = null;
     }

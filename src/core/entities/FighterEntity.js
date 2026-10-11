@@ -268,6 +268,59 @@ export class FighterEntity {
     }
 
     // =========================================================================
+    // La capa de guardia
+    // =========================================================================
+
+    /**
+     * La capa de guardia. Con la guardia puesta, la cruceta deja de ser un
+     * mando de ocho vias y pasa a uno de dos: arriba salta, abajo se agacha.
+     *
+     * POR QUE ESTO NO SON REGLAS DE TRANSICION (y las de guardia que ya hay,
+     * tampoco)
+     *   Las reglas de `Transitions` que usan `Intent.GUARDIA` se disparan con
+     *   la ARISTA de ese boton. El jugador casi nunca pulsa guardia y abajo en
+     *   el MISMO frame: primero levanta la mano de la guardia y luego baja el
+     *   pulgar a la cruceta. Con la arista, ese segundo gesto ya no dispara
+     *   nada y el peleador se queda en guardia alta para siempre, con el
+     *   boton apretado. Era lo que pasaba con `AGACHADO_GUARDIA_BAJA`: solo
+     *   se llegaba pulsando los dos a la vez.
+     *
+     * POR QUE ESTA PARTIDA EN DOS LLAMADAS Y EL ORDEN ES IMPORTANTE
+     *   El salto se pide como INTENT (`SALTAR`) y la regla que lo traduce
+     *   vive en `Transitions`: tiene que emitirse ANTES de `setInput`.
+     *   Agacharse es un ESTADO, y ese cambio tiene que ir DESPUES de
+     *   `setInput`, porque hay una regla `GUARDIA -> AGACHADO_GUARDIA_ALTA`
+     *   que se dispara con la arista de la guardia y pondria la guardia alta
+     *   por encima de lo que esta acaba de decidir. Puestas al reves, agachar
+     *   con la guardia puesta no funcionaba nunca.
+     */
+
+    /** `guardia + arriba` = salto. Va ANTES de `setInput` (es un intent). */
+    _guardJump(input, extra) {
+        if (!input.guard) return;
+        if (!this.fsm.state.control.canAct) return;
+        if (input.down) return;                 // abajo manda: es guardia baja
+        // Con la ARISTA de arriba (`dirEdge`), no con el estado: mantener arriba
+        // con la guardia en alto no tiene que dejar saltando en bucle. Las
+        // diagonales tampoco cuentan, porque `UP_LEFT` y `UP_RIGHT` son
+        // direcciones de ataque, no el boton de saltar.
+        if (input.dirEdge !== 'UP') return;
+        if (!this.fsm.inGroup(StateGroup.GROUNDED)) return;
+        extra.pressed[Intent.SALTAR] = true;
+        extra.flags.up = true;
+    }
+
+    /** `guardia + abajo` = guardia baja. Va DESPUES de `setInput`. */
+    _guardCrouch(input) {
+        if (!input.guard) return;
+        if (!input.down) return;
+        if (this.fsm.stateId === State.AGACHADO_GUARDIA_BAJA) return;
+        this.fsm.changeState(State.AGACHADO_GUARDIA_BAJA, {
+            source: TransitionSource.INPUT, reason: 'guardia + abajo'
+        });
+    }
+
+    // =========================================================================
     // Ciclo principal
     // =========================================================================
 
@@ -295,6 +348,9 @@ export class FighterEntity {
                 source: TransitionSource.SYSTEM, reason: 'guardia soltada'
             });
         }
+
+        // 1b. La capa de guardia: ARRIBA salta (antes de `setInput`, es un intent).
+        this._guardJump(input, extra);
 
         // 2. Maquina de locomocion (puede pedir el intent DASH).
         this._locomotion(dt, input, world, extra);
@@ -333,6 +389,12 @@ export class FighterEntity {
         const prevId = this.fsm.stateId;
         this.fsm.setInput(finalInput);
         if (this.fsm.stateId !== prevId) this._onStateEnter(prevId);
+
+        // 1c. Y ahora ABAJO con la guardia = guardia baja. Va DESPUES a
+        // proposito: la regla `GUARDIA -> AGACHADO_GUARDIA_ALTA` de
+        // `Transitions` se dispara con la arista de la guardia, y si esta se
+        // ejecutara antes se quedaria en guardia alta para siempre.
+        this._guardCrouch(input);
 
         // 6. Avanzar la maquina.
         //
