@@ -50,6 +50,7 @@ const MT = await load('src/core/fsm/MoveTable.js');
 // vacio y GANCHO, GOLPE_CODO, UPPERCUT y PATADA_FRONTAL "no existen" cuando si
 // existen. Que es justo lo que estas pruebas tienen que comprobar.
 await load('src/core/fsm/states/Movesets.js');
+const AP = await load('src/core/entities/AttackPoses.js');
 
 const { resolveAttack, quantizeDirection, allCombinations, ATTACK_MATRIX, DIRECTIONS, STANCES, BUTTONS } = DM;
 
@@ -201,10 +202,6 @@ section('4 · Que golpes existen ya de verdad');
 // ===========================================================================
 
 run('las celdas que el motor ya produce apuntan a golpes que EXISTEN', () => {
-    // La matriz declara 54 celdas y muchas son golpes que todavia no estan en
-    // el moveset. Eso es lo previsto: `stanceAttackKey` comprueba `hasMove` y
-    // cae al golpe del estado. Pero las CELDAS QUE YA FUNCIONABAN no pueden
-    // apuntar a la nada, o se habria roto el combate al empezar a usar esto.
     const existe = (key) => !!(MT.CORE_MOVES[key] || MT.getMoves('PEDRO')[key]);
 
     const queYaDebenExistir = [
@@ -214,6 +211,62 @@ run('las celdas que el motor ya produce apuntan a golpes que EXISTEN', () => {
     for (const key of queYaDebenExistir) {
         ok(existe(key), `${key} existe en CORE_MOVES`, key);
     }
+});
+
+run('AHORA TODAS: las 54 celdas apuntan a un golpe que existe', () => {
+    // Este bloque no existia cuando se escribio la matriz: entonces muchas
+    // celdas apuntaban a golpes todavia sin escribir y caian al golpe del
+    // estado, que era justo lo previsto. Ya rellenados, la matriz no puede
+    // depender de esa red: si una celda vuelve a apuntar a la nada, el
+    // silencio vuelve a ser la respuesta y no se ve por aqui.
+    const existe = (key) => !!(MT.CORE_MOVES[key] || MT.getMoves('PEDRO')[key]);
+    const faltan = allCombinations()
+        .map((c) => c.move)
+        .filter((key) => !existe(key));
+    ok(faltan.length === 0,
+        'las 54 celdas tienen golpe real', [...new Set(faltan)].join(', '));
+});
+
+run('cada golpe de la matriz tiene SILUETA', () => {
+    // Un golpe sin silueta no falla: `silhouetteOf` cae en JAB y una patada se
+    // anima como un puño. El jugador ve "este boton hace un jab" cuando ha
+    // pulsado una patada, que es la confusion mas cara que puede dar un panel.
+    const sinSilueta = [];
+    for (const c of allCombinations()) {
+        const fam = AP.silhouetteOf(c.move);
+        if (!AP.ATTACK_SILHOUETTES[fam]) sinSilueta.push(`${c.move}->${fam}`);
+    }
+    ok(sinSilueta.length === 0,
+        'ninguna celda cae en una familia inexistente', sinSilueta.slice(0, 6).join(', '));
+});
+
+run('dos direcciones distintas NO se animan igual', () => {
+    // ESTE es el requisito real del jugador: que pulsar arriba-izquierda se
+    // vea distinto a pulsar abajo-derecha. Con los 45 golpes rellenos, cada
+    // celda tiene su frame data Y su silueta. Que dos direcciones compartan
+    // las dos cosas a la vez es lo unico que haria la cruceta decorativa.
+    const existe = (key) => !!(MT.CORE_MOVES[key] || MT.getMoves('PEDRO')[key]);
+    const iguales = [];
+    for (const stance of STANCES) {
+        for (const button of BUTTONS) {
+            const vistas = new Map();
+            for (const dir of DIRECTIONS) {
+                const move = resolveAttack(stance, dir, button);
+                if (!existe(move)) continue;
+                const a = MT.getMoves('PEDRO')[move] || MT.CORE_MOVES[move];
+                // La firma de un golpe: lo que el jugador nota. Los frames de
+                // inicio y recuperacion mas la silueta que lo dibuja.
+                const firma = `${a.startup}/${a.recovery}/${AP.silhouetteOf(move)}`;
+                if (vistas.has(firma)) {
+                    iguales.push(`${stance}/${button}: ${dir} se ve como ${vistas.get(firma)}`);
+                } else {
+                    vistas.set(firma, dir);
+                }
+            }
+        }
+    }
+    ok(iguales.length === 0,
+        'ninguna direccion repite firma (frames + silueta)', iguales.slice(0, 8));
 });
 
 run('las cuatro direcciones que ya funcionaban siguen dando lo mismo', () => {

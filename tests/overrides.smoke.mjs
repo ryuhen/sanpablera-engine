@@ -831,7 +831,14 @@ run('TODOS los objetivos de la tabla estan al alcance del cuerpo', () => {
     // existe.
     const FAMS = {
         JAB: 'ATAQUE_LIGERO', GANCHO: 'GANCHO', UPPERCUT: 'UPPERCUT',
-        KICK: 'ATAQUE_PESADO', SWEEP: 'ATAQUE_BARRIDO'
+        KICK: 'ATAQUE_PESADO', SWEEP: 'ATAQUE_BARRIDO',
+        // Las cinco de la matriz de direcciones. Entran aqui por el mismo
+        // motivo que las otras cinco: un objetivo fuera de alcance no da error,
+        // el IK lo recorta en silencio y el golpe se ve "igual de bien" sin
+        // llegar. Si una de estas se colara, el fallo seria invisible.
+        BACKFIST: 'PUNO_ATRAS_DER', SIDEKICK: 'PATADA_LADO_DER',
+        HIGHKICK: 'PATADA_ALTA_DER', SPINKICK: 'PATADA_SPIN_DER',
+        LOWKICK: 'PATADA_BAJA_DER'
     };
     const alcBrazo = rig.bones[rig.index.UPPERARM_L].length
         + rig.bones[rig.index.FOREARM_L].length;
@@ -871,7 +878,15 @@ run('TODOS los objetivos de la tabla estan al alcance del cuerpo', () => {
             }
         }
     }
-    ok(medidos >= 50, 'se han medido todos los objetivos', medidos);
+    // EXACTO, NO `>=`. Con `>= 50` bastaba con que la mitad de las familias
+    // se quedara sin medir y el test siguiera en verde: el fallo se veria
+    // como "no hay problema de alcance", que es lo contrario de lo que pasaria.
+    // Ahora el numero esperado sale de la propia lista: si anades una familia
+    // y te olvidas de sus cuatro contextos, falla.
+    const esperados = Object.keys(FAMS).length * 4 * 3;
+    ok(medidos === esperados,
+        `se han medido los ${esperados} objetivos (una familia x 4 contextos x 3 fases)`,
+        medidos);
     ok(fuera.length === 0,
         'ninguno pide mas de lo que el cuerpo puede dar', fuera.slice(0, 8));
 });

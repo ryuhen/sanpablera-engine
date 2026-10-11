@@ -225,6 +225,127 @@ export const ATTACK_SILHOUETTES = Object.freeze({
             base: Object.freeze({ hip: 0.58, pitch: 0.56, twist: -0.28, yaw: 0, hipDrop: 0.10 }),
             legL: Object.freeze({ home: [0.28, 0.06, 0.20], startup: [0.30, 0.24, 0.10], active: [0.08, 0.14, 0.84] })
         })
+    }),
+
+    // =====================================================================
+    // LAS FAMILIAS DE LA MATRIZ DE DIRECCIONES
+    // =====================================================================
+    // POR QUE CINCO MAS Y NO UNA POR CADA GOLPE
+    //   La matriz tiene 54 celdas, pero las siluetas NO son 54: el brazo llega
+    //   igual de lejos en un gancho que en un gancho de la izquierda, y escribir
+    //   54 tablas de poses casi iguales seria copiar cuatro veces lo mismo.
+    //
+    //   Lo que hace que dos golpes se VEAN distintos es de donde sale el
+    //   miembro y hacia donde va: el codo entra corto y por dentro, la patada
+    //   de lado sale por el costado, la alta sube por encima de la cabeza. Eso
+    //   son cinco formas, no nueve, y la izquierda y la derecha de la misma
+    //   forma se distinguen porque el `yaw` del torso va con signo contrario.
+    //   El test de alcance de `overrides.smoke.mjs` recorre estas cinco tambien:
+    //   un objetivo fuera de rango no da error, solo deja de moverse.
+
+    // --- PUÑO DE REVÉS (hacia atrás y cruzado) ---------------------------
+    BACKFIST: Object.freeze({
+        STAND: Object.freeze({
+            base: Object.freeze({ hip: 0.86, pitch: 0.12, twist: 0.50, yaw: 0.10 }),
+            armL: Object.freeze({ home: [0.24, 1.18, 0.20], startup: [0.28, 1.22, -0.04], active: [0.26, 1.24, 0.34] })
+        }),
+        CROUCH: Object.freeze({
+            base: Object.freeze({ hip: 0.50, pitch: 0.36, twist: 0.44, yaw: 0.12 }),
+            armL: Object.freeze({ home: [0.24, 0.86, 0.20], startup: [0.26, 0.92, -0.02], active: [0.24, 0.92, 0.30] })
+        }),
+        AIR: Object.freeze({
+            base: Object.freeze({ hip: 0.86, pitch: 0.22, twist: 0.58, yaw: 0.12 }),
+            airborne: true,
+            armL: Object.freeze({ home: [0.32, 1.10, 0.10], startup: [0.32, 1.30, -0.08], active: [0.28, 1.30, 0.30] })
+        }),
+        DOWN: Object.freeze({
+            base: Object.freeze({ hip: 0.70, pitch: 0.48, twist: 0.38, yaw: 0.10 }),
+            armL: Object.freeze({ home: [0.28, 1.10, 0.24], startup: [0.30, 1.26, 0.00], active: [0.26, 1.20, 0.32] })
+        })
+    }),
+
+    // --- PATADA DE LADO (por el costado) --------------------------------
+    SIDEKICK: Object.freeze({
+        STAND: Object.freeze({
+            base: Object.freeze({ hip: 0.86, pitch: 0.14, twist: -0.10, yaw: 0.55, hipLift: 0.06 }),
+            legL: Object.freeze({ home: [0.20, 0.02, 0.12], startup: [0.34, 0.40, -0.02], active: [0.58, 0.86, 0.18] })
+        }),
+        CROUCH: Object.freeze({
+            base: Object.freeze({ hip: 0.50, pitch: 0.38, twist: -0.08, yaw: 0.50, hipLift: 0.04 }),
+            legL: Object.freeze({ home: [0.24, 0.04, 0.14], startup: [0.30, 0.28, 0.00], active: [0.48, 0.50, 0.16] })
+        }),
+        AIR: Object.freeze({
+            base: Object.freeze({ hip: 0.84, pitch: 0.22, twist: -0.14, yaw: 0.60, hipLift: 0.06 }),
+            airborne: true,
+            legL: Object.freeze({ home: [0.16, 0.34, 0.16], startup: [0.30, 0.54, 0.04], active: [0.54, 0.84, 0.16] })
+        }),
+        DOWN: Object.freeze({
+            base: Object.freeze({ hip: 0.68, pitch: 0.46, twist: -0.10, yaw: 0.50, hipDrop: 0.03 }),
+            legL: Object.freeze({ home: [0.26, 0.06, 0.20], startup: [0.34, 0.32, 0.06], active: [0.50, 0.64, 0.20] })
+        })
+    }),
+
+    // --- PATADA ALTA (por encima de la cabeza) ---------------------------
+    HIGHKICK: Object.freeze({
+        STAND: Object.freeze({
+            base: Object.freeze({ hip: 0.80, pitch: 0.04, twist: -0.16, yaw: 0, hipLift: 0.10 }),
+            legL: Object.freeze({ home: [0.20, 0.02, 0.12], startup: [0.14, 0.52, -0.04], active: [0.06, 1.40, 0.50] })
+        }),
+        CROUCH: Object.freeze({
+            base: Object.freeze({ hip: 0.48, pitch: 0.30, twist: -0.14, yaw: 0, hipLift: 0.06 }),
+            legL: Object.freeze({ home: [0.24, 0.04, 0.14], startup: [0.18, 0.42, 0.00], active: [0.10, 1.00, 0.44] })
+        }),
+        AIR: Object.freeze({
+            base: Object.freeze({ hip: 0.86, pitch: 0.12, twist: -0.22, yaw: 0, hipLift: 0.08 }),
+            airborne: true,
+            legL: Object.freeze({ home: [0.16, 0.34, 0.16], startup: [0.12, 0.70, 0.02], active: [0.04, 1.36, 0.46] })
+        }),
+        DOWN: Object.freeze({
+            base: Object.freeze({ hip: 0.66, pitch: 0.38, twist: -0.18, yaw: 0, hipLift: 0.06 }),
+            legL: Object.freeze({ home: [0.26, 0.06, 0.20], startup: [0.22, 0.48, 0.04], active: [0.14, 1.04, 0.48] })
+        })
+    }),
+
+    // --- PATADA DE GIRO (todo el cuerpo gira) ----------------------------
+    SPINKICK: Object.freeze({
+        STAND: Object.freeze({
+            base: Object.freeze({ hip: 0.86, pitch: 0.18, twist: -0.50, yaw: 0.80, hipLift: 0.06 }),
+            legL: Object.freeze({ home: [0.20, 0.02, 0.12], startup: [0.24, 0.40, 0.00], active: [0.18, 0.88, 0.64] })
+        }),
+        CROUCH: Object.freeze({
+            base: Object.freeze({ hip: 0.50, pitch: 0.42, twist: -0.44, yaw: 0.70, hipLift: 0.03 }),
+            legL: Object.freeze({ home: [0.24, 0.04, 0.14], startup: [0.28, 0.30, 0.02], active: [0.20, 0.54, 0.56] })
+        }),
+        AIR: Object.freeze({
+            base: Object.freeze({ hip: 0.84, pitch: 0.26, twist: -0.56, yaw: 0.85, hipLift: 0.06 }),
+            airborne: true,
+            legL: Object.freeze({ home: [0.16, 0.34, 0.16], startup: [0.22, 0.56, 0.04], active: [0.14, 0.86, 0.54] })
+        }),
+        DOWN: Object.freeze({
+            base: Object.freeze({ hip: 0.68, pitch: 0.50, twist: -0.42, yaw: 0.70, hipDrop: 0.03 }),
+            legL: Object.freeze({ home: [0.26, 0.06, 0.20], startup: [0.32, 0.34, 0.08], active: [0.24, 0.66, 0.58] })
+        })
+    }),
+
+    // --- PATADA BAJA (por debajo de la cintura, sin barrer) --------------
+    LOWKICK: Object.freeze({
+        STAND: Object.freeze({
+            base: Object.freeze({ hip: 0.74, pitch: 0.28, twist: -0.22, yaw: 0, hipDrop: 0.08 }),
+            legL: Object.freeze({ home: [0.20, 0.02, 0.12], startup: [0.16, 0.30, 0.04], active: [0.04, 0.32, 0.78] })
+        }),
+        CROUCH: Object.freeze({
+            base: Object.freeze({ hip: 0.44, pitch: 0.46, twist: -0.20, yaw: 0, hipDrop: 0.04 }),
+            legL: Object.freeze({ home: [0.24, 0.04, 0.14], startup: [0.22, 0.26, 0.06], active: [0.08, 0.24, 0.70] })
+        }),
+        AIR: Object.freeze({
+            base: Object.freeze({ hip: 0.88, pitch: 0.28, twist: -0.26, yaw: 0 }),
+            airborne: true,
+            legL: Object.freeze({ home: [0.16, 0.40, 0.14], startup: [0.16, 0.58, 0.04], active: [0.06, 0.34, 0.54] })
+        }),
+        DOWN: Object.freeze({
+            base: Object.freeze({ hip: 0.62, pitch: 0.54, twist: -0.22, yaw: 0, hipDrop: 0.06 }),
+            legL: Object.freeze({ home: [0.26, 0.06, 0.20], startup: [0.28, 0.28, 0.08], active: [0.14, 0.36, 0.72] })
+        })
     })
 });
 
@@ -265,7 +386,65 @@ export const MOVE_SILHOUETTES = Object.freeze({
     ATAQUE_AEREO: 'KICK',
     ATAQUE_AGACHADO: 'JAB',
     ATAQUE_ESPECIAL: 'JAB',
-    RV_FIN: 'KICK'
+    RV_FIN: 'KICK',
+
+    // =====================================================================
+    // LA MATRIZ DE DIRECCIONES (core/directionMatrix.js)
+    // =====================================================================
+    // De pie, puño. Los laterales y los de delante son ganchos y jabs: el brazo
+    // llega igual de lejos en todos ellos, lo que los separa es hacia donde va.
+    PUNO_IZQUIERDO: 'GANCHO',
+    PUNO_DERECHO: 'GANCHO',
+    PUNO_ADELANTE_IZQ: 'JAB',
+    PUNO_ADELANTE_DER: 'JAB',
+    PUNO_ATRAS_IZQ: 'BACKFIST',
+    PUNO_ATRAS_DER: 'BACKFIST',
+    // De pie, patada. Cada forma tiene su familia porque la direccion del pie
+    // es justo lo que el jugador ve: de lado, arriba o girando no son lo mismo.
+    PATADA_ATRAS: 'KICK',
+    PATADA_LADO_IZQ: 'SIDEKICK',
+    PATADA_LADO_DER: 'SIDEKICK',
+    PATADA_ALTA_IZQ: 'HIGHKICK',
+    PATADA_ALTA_DER: 'HIGHKICK',
+    PATADA_SPIN_IZQ: 'SPINKICK',
+    PATADA_SPIN_DER: 'SPINKICK',
+    // Agachado. Los dos que SUBEN (PATADA_BAJA_ALTA_*) van con KICK y no con
+    // LOWKICK a proposito: son el unico castigo por quedarse en el suelo, y
+    // tienen que verse claramente mas altos que el resto del suelo.
+    PUNO_AGACHADO_ADELANTE: 'JAB',
+    PUNO_AGACHADO_ATRAS: 'JAB',
+    PUNO_AGACHADO_IZQ: 'GANCHO',
+    PUNO_AGACHADO_DER: 'GANCHO',
+    PUNO_AGACHADO_ADELANTE_IZQ: 'JAB',
+    PUNO_AGACHADO_ADELANTE_DER: 'JAB',
+    PUNO_AGACHADO_ATRAS_IZQ: 'BACKFIST',
+    PUNO_AGACHADO_ATRAS_DER: 'BACKFIST',
+    PATADA_AGACHADA: 'KICK',
+    PATADA_AGACHADA_ATRAS: 'KICK',
+    PATADA_BAJA_IZQ: 'LOWKICK',
+    PATADA_BAJA_DER: 'LOWKICK',
+    PATADA_BAJA_ALTA_IZQ: 'KICK',
+    PATADA_BAJA_ALTA_DER: 'KICK',
+    BARRIDO_IZQ: 'SWEEP',
+    BARRIDO_DER: 'SWEEP',
+    // En el aire
+    PUNO_AEREO_ADELANTE: 'JAB',
+    PUNO_AEREO_ATRAS: 'JAB',
+    PUNO_AEREO_IZQ: 'GANCHO',
+    PUNO_AEREO_DER: 'GANCHO',
+    PUNO_AEREO_ADELANTE_IZQ: 'JAB',
+    PUNO_AEREO_ADELANTE_DER: 'JAB',
+    PUNO_AEREO_ATRAS_IZQ: 'BACKFIST',
+    PUNO_AEREO_ATRAS_DER: 'BACKFIST',
+    PATADA_AEREA: 'KICK',
+    PATADA_AEREA_ADELANTE: 'KICK',
+    PATADA_AEREA_ATRAS: 'KICK',
+    PATADA_AEREA_IZQ: 'SIDEKICK',
+    PATADA_AEREA_DER: 'SIDEKICK',
+    PATADA_AEREA_ALTA_IZQ: 'HIGHKICK',
+    PATADA_AEREA_ALTA_DER: 'HIGHKICK',
+    PATADA_AEREO_SPIN_IZQ: 'SPINKICK',
+    PATADA_AEREO_SPIN_DER: 'SPINKICK'
 });
 
 /** La silueta de un golpe: la que declara el moveset, o la de la tabla. */
