@@ -47,22 +47,150 @@ import { load } from './loader.mjs';
 // EL DOM DE MENTIRA
 // ===========================================================================
 function installDom() {
-    const byId = new Map();
-
     /** Define un global aunque sea de solo lectura (Node 22+ lo tiene asi). */
     const definir = (nombre, valor) => Object.defineProperty(globalThis, nombre, {
         value: valor, writable: true, configurable: true
     });
 
+    /**
+     * `classList` VIVO sobre el atributo `class`.
+     *
+     * POR QUE NO UNA COPIA EN UN Set
+     *   La primera version guardaba las clases en un `Set` propio del elemento
+     *   y hacia una foto al crearlo. Con eso, `el.classList.add('mod')` no
+     *   llegaba nunca a `el.className`, y el inspector marca la fila de "valor
+     *   modificado" justamente con `classList.add('mod')`: la prueba veia
+     *   `spf-sl` para siempre, y en el navegador habria funcionado. Un DOM que
+     *   se comporta peor que el real hace que las pruebas den una confianza
+     *   falsa, que es peor que no probarlo.
+     *
+     *   Aqui `classList` lee y escribe `_class` cada vez, como el navegador.
+     */
     function clase(el) {
-        const set = new Set((el._class || '').split(' ').filter(Boolean));
+        const leer = () => (el._class || '').split(' ').filter(Boolean);
+        const escribir = (lista) => { el._class = Array.from(new Set(lista)).join(' '); };
         return {
-            add: (c) => set.add(c),
-            remove: (c) => set.delete(c),
-            contains: (c) => set.has(c),
-            get value() { return Array.from(set).join(' '); },
-            set value(v) { set = new Set(v.split(' ').filter(Boolean)); }
+            add: (c) => { if (!leer().includes(c)) escribir(leer().concat(c)); },
+            remove: (c) => escribir(leer().filter((x) => x !== c)),
+            toggle: (c) => { if (leer().includes(c)) this.remove(c); else this.add(c); },
+            contains: (c) => leer().includes(c),
+            get length() { return leer().length; },
+            get value() { return el._class || ''; },
+            set value(v) { escribir(String(v).split(' ').filter(Boolean)); }
         };
+    }
+
+    /**
+     * Convierte un trozo de HTML en nodos hijos de `raiz`.
+     *
+     * POR QUE HAY UN PARSER Y NO UNA BUSQUEDA DE IDS CON REGEX
+     *   El codigo del inspector mete sus hijos con `appendChild` (los botones de
+     *   las pestanas, cada fila de slider) y sus nietos tambien. Un DOM que no
+     *   anida no puede responder a eso, y ademas `querySelector` acaba
+     *   buscando en un sitio distinto del real.
+     *
+     *   Solo hace falta lo que el panel usa: sin scripts, sin `template`, sin
+     *   autocierre de tags (el marcado del inspector esta todo cerrado y
+     *   escrito a mano). `<input>` y `<br>` si son sin cerrar, que es lo unico
+     *   que hay que tratar de forma especial.
+     */
+    const SIN_CIERRE = new Set(['input', 'br', 'hr', 'img', 'meta', 'link']);
+
+    function parsearEn(raiz, html) {
+        const pila = [raiz];
+        // POR QUE LA PARTE DE LOS ATRIBUTOS LLEVA UN `+` Y NO UN `*`
+        //   El patron original era `(...|'[^']*'|[^'">])*`, con un `*` sobre
+        //   una alternacion que puede NO CONSUMIR NADA (la ultima rama admite la
+        //   cadena vacia). Eso deja el cuantificador atrapado en el estado de
+        //   "puede seguir consumiendo" sin avanzar: `exec` devuelve una
+        //   coincidencia de longitud cero para siempre y este bucle se queda
+        //   colgado sin excepcion ni mensaje.
+        //
+        //   Con `+` la coincidencia tiene que consumir al menos un caracter, asi
+        //   que `m[0].length` es siempre mayor que cero y el bucle avanza. Como
+        //   forma parte de `<tag ...>`, la coincidencia entera nunca es vacia.
+        const re = /<\/?([a-zA-Z][\w-]*)((?:"[^"]*"|'[^']*'|[^'">])+)?\/?>/g;
+        let m;
+        let ultimo = 0;
+        while ((m = re.exec(html)) !== null) {
+            // El texto entre tags se ignora salvo que tenga contenido real:
+            // el inspector escribe etiquetas en HTML con contenido ("COPIAR"),
+            // y no interesa, pero el `textContent` de las pruebas lo comprueba
+            // en los botones que crea con `createElement`, no desde el HTML.
+            ultimo = m.index + m[0].length;
+            const nombre = m[1].toLowerCase();
+            const cierre = m[0].charAt(1) === '/';
+            const autoCierre = m[0].charAt(m[0].length - 2) === '/';
+
+            if (cierre) {
+                // Sube hasta el padre del que coincide. Si no esta en la pila
+                // (etiqueta sin abrir) se ignora, como haria el navegador.
+                for (let i = pila.length - 1; i > 0; i--) {
+                    if (pila[i].tagName === nombre.toUpperCase()) { pila.length = i; break; }
+                }
+                continue;
+            }
+
+            const nodo = crear(nombre);
+            nodo._parent = pila[pila.length - 1];
+            pila[pila.length - 1]._children.push(nodo);
+            leerAtributos(nodo, m[2] || '');
+            if (!SIN_CIERRE.has(nombre) && !autoCierre) pila.push(nodo);
+        }
+        void ultimo;
+    }
+
+    /** Lee los atributos de una etiqueta y los deja en el nodo. */
+    function leerAtributos(nodo, texto) {
+        const re = /([a-zA-Z_:][-\w:.]*)\s*(?:=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+        let a;
+        while ((a = re.exec(texto)) !== null) {
+            const nombre = a[1].toLowerCase();
+            const valor = a[2] !== undefined ? a[2]
+                : a[3] !== undefined ? a[3]
+                    : a[4] !== undefined ? a[4] : '';
+            if (nombre === 'class') nodo._class = valor;
+            else if (nombre === 'id') nodo.id = valor;
+            else if (nombre === 'value') nodo._value = valor;
+            else if (nombre === 'min') nodo._min = valor;
+            else if (nombre === 'max') nodo._max = valor;
+            else if (nombre === 'step') nodo._step = valor;
+            else if (nombre === 'type') nodo.type = valor;
+            else nodo.attributes[nombre] = String(valor);
+        }
+    }
+
+    /**
+     * Parte un selector en [etiqueta, clase].
+     *
+     * POR QUE HACE FALTA LA PARTE DE LA ETIQUETA
+     *   Sin ella, `querySelector('.spf-sl')` busca una clase EXACTA. Como el
+     *   inspector pone `class="spf-sl mod"` en las filas ya modificadas, esa
+     *   fila dejaba de coincidir con su propia clase: el mismo elemento era
+     *   encontrado antes de marcarlo y desaparecido despues. Un selector de
+     *   clase en un navegador real hace coincidencia PARCIAL, y `tag.clase`
+     *   significa "de esta etiqueta Y con esta clase".
+     */
+    function partir(sel) {
+        const s = sel.trim();
+        // `#id` y `.clase`: se distinguen por el primer caracter, NO buscando
+        // un punto. La version anterior hacia `sel.indexOf('.')`, de modo que
+        // un selector que EMPIEZA por `#` (que es el que usa el inspector para
+        // todos sus elementos) caia en la rama de "no hay punto", devolvia
+        // `['#SPF-SLIDERS', null]` y `querySelector('#spf-sliders')` devolvia
+        // null para siempre: el panel se construia sin ningun hijo resoluble.
+        if (s.charAt(0) === '#') return [null, '#' + s.slice(1)];
+        if (s.charAt(0) === '.') return [null, s.slice(1)];
+        const puntos = s.indexOf('.');
+        if (puntos === -1) return [s.toUpperCase(), null];
+        return [s.slice(0, puntos).toUpperCase() || null, s.slice(puntos + 1)];
+    }
+
+    function coincide(el, tag, clase) {
+        if (clase && clase.charAt(0) === '#') return el.id === clase.slice(1);
+        if (tag && el.tagName !== tag) return false;
+        if (clase === null || clase === undefined) return true;
+        return (el._class || '').split(' ').includes(clase);
     }
 
     function crear(tag) {
@@ -76,6 +204,8 @@ function installDom() {
             attributes: {},
             _listeners: {},
             _value: '',
+            id: '',
+            type: '',
             _html: '',
             textContent: '',
             get className() { return this._class; },
@@ -89,35 +219,28 @@ function installDom() {
             get step() { return this._step === undefined ? '1' : String(this._step); },
             set step(v) { this._step = v; },
             set innerHTML(h) {
+                // CONSTRUYE EL ARBOL DE VERDAD, no una lista plana de ids.
+                //
+                // La primera version de este DOM hacia `byId.clear()` y metia
+                // todos los ids en un mapa GLOBAL. Parecia funcionar hasta que
+                // una prueba creo un SEGUNDO inspector: al construir su marcado
+                // vacioaba el mapa y el primer panel se quedaba sin ids. Todas
+                // las pruebas de la seccion 4 fallaron con "null", que no
+                //SIGNIFICA NADA: en un navegador real cada arbol lleva sus
+                // propios ids.
                 this._html = h;
-                // El inspector pone todo su marcado en UN solo innerHTML. Lo que
-                // se necesita aqui es poder localizar lo que el codigo va a
-                // buscar despues: los `id`. Se recorre el texto del HTML, que
-                // es exactamente lo que un navegador haria al construirlo.
-                byId.clear();
-                const re = /\bid="([^"]+)"/g;
-                let m;
-                while ((m = re.exec(h)) !== null) {
-                    const hijo = crear('div');
-                    hijo.id = m[1];
-                    hijo._class = (h.slice(Math.max(0, m.index - 120), m.index).match(/class="([^"]*)"\s*$/)
-                        || [, ''])[1];
-                    this._children.push(hijo);
-                    hijo._parent = this;
-                    byId.set(m[1], hijo);
-                }
+                this._children = [];
+                parsearEn(this, h);
             },
             get innerHTML() { return this._html; },
             appendChild(hijo) {
                 hijo._parent = this;
                 this._children.push(hijo);
-                if (hijo.id) byId.set(hijo.id, hijo);
                 return hijo;
             },
             removeChild(hijo) {
                 const i = this._children.indexOf(hijo);
                 if (i >= 0) this._children.splice(i, 1);
-                if (hijo.id) byId.delete(hijo.id);
                 return hijo;
             },
             remove() {
@@ -159,13 +282,15 @@ function installDom() {
                 return salida;
             },
             querySelector(sel) {
-                if (sel.charAt(0) === '#') {
-                    return byId.get(sel.slice(1)) || null;
-                }
-                // Selector de clase: suficiente para lo que usa el inspector.
-                const clase = sel.replace(/^\./, '');
-                const todos = this.walk();
-                return todos.find((h) => (h._class || '').split(' ').includes(clase)) || null;
+                // Busca en el SUBARBOL de este elemento, como un navegador. La
+                // version anterior consultaba un mapa global y por eso una
+                // segunda instancia del panel invalidaba a la primera.
+                const [tag, clase] = partir(sel);
+                return this.walk().find((h) => coincide(h, tag, clase)) || null;
+            },
+            querySelectorAll(sel) {
+                const [tag, clase] = partir(sel);
+                return this.walk().filter((h) => coincide(h, tag, clase));
             }
         };
         el.classList = clase(el);
@@ -174,14 +299,16 @@ function installDom() {
 
     const cuerpo = crear('body');
     const cabeza = crear('head');
-    const raiz = { body: cuerpo, head: cabeza, byId, crear };
+    const raiz = { body: cuerpo, head: cabeza, crear };
 
     definir('document', {
         body: cuerpo,
         head: cabeza,
         activeElement: null,
         createElement: (t) => crear(t),
-        getElementById: (id) => byId.get(id) || null,
+        // `getElementById` busca en TODO el documento, no en un mapa: el
+        // inspector lo usa para no insertar dos veces la hoja de estilo.
+        getElementById: (id) => cuerpo.walk().find((h) => h.id === id) || null,
         execCommand: () => true
     });
     // `window` TIENE que ser un objeto de verdad, no un `{...}` literal.
@@ -324,18 +451,27 @@ run('TODOS los id que pide el codigo existen en su HTML', () => {
 run('abrir y cerrar varias veces no duplica nada', () => {
     // Si `open()` construyera el DOM otra vez en vez de solo mostrarlo, cada
     // F2 duplicaria el panel entero. Con veinte aperturas se notaria; con
-    // dos, no. Se comprueba el conteo de hijos del body, que es lo que crece.
-    const antes = document.body.walk().length;
+    // dos, no.
+    //
+    // Se cuenta el numero de PANELES, no de nodos: los nodos cambian con cada
+    // `refresh()` (los sliders se repintan), asi que un conteo de nodos
+    // mediria los repintados y no la duplicacion. Lo que tiene que quedarse
+    // en uno es el panel.
+    const paneles = () => document.body._children.filter((h) => (h._class || '').indexOf('spf-insp') !== -1).length;
+    const antes = paneles();
     const model = fakeModel();
     const insp = new I.AnimInspector({ model });
-    const conUno = document.body.walk().length;
+    const conUno = paneles();
     for (let i = 0; i < 20; i++) {
         insp.open();
+        insp.refresh();
+        insp.apply();
         insp.close();
     }
-    ok(document.body.walk().length === conUno,
-        'el numero de nodos no crece con 20 aperturas',
-        [antes, conUno, document.body.walk().length]);
+    ok(conUno === antes + 1, 'crear el inspector añade UN panel al body',
+        [antes, conUno]);
+    ok(paneles() === conUno, 'y 20 aperturas no añaden ninguno mas',
+        [conUno, paneles()]);
     ok(insp.isOpen() === false, 'y al terminar esta cerrado');
 });
 
@@ -348,13 +484,17 @@ run('la vista de GOLPE genera sliders', () => {
     const insp = new I.AnimInspector({ model });
     O.clearAll();
     insp.open();
-    const filas = insp.$('spf-sliders')._children;
+    const filas = insp.$('spf-sliders')._children.filter((h) => (h._class || '').indexOf('spf-sl') !== -1);
     ok(filas.length > 0, 'hay sliders', filas.length);
     // Cada fila tiene que tener los cuatro elementos: etiqueta, rango, numero
     // y el boton de volver al valor del fichero. Una fila con el rango pero sin
     // el boton de reset deja al usuario sin salida (no puede volver al valor
     // del codigo sin recargar la pagina).
-    const conReset = filas.filter((f) => (f._class || '').indexOf('spf-sl-x') !== -1).length;
+    //
+    // Se busca el boton por SU clase (`spf-sl-x`), que es como esta escrito,
+    // y no por la posicion: si se añadiera una columna, la prueba seguiria
+    // diciendo la verdad.
+    const conReset = filas.filter((f) => f.querySelectorAll('.spf-sl-x').length === 1).length;
     ok(conReset === filas.length, 'todas tienen boton de reset', [conReset, filas.length]);
     insp.close();
 });
@@ -365,27 +505,34 @@ run('la rueda sobre un slider lo mueve UN paso', () => {
     O.clearAll();
     insp.open();
 
-    const fila = insp.$('spf-sliders')._children[0];
-    const rng = fila._children[1];      // [label, range, number, unit, reset]
-    ok((rng._class || '').indexOf('spf-rng') !== -1, 'el segundo hijo es el rango',
-        rng._class);
+    // El rango se busca por su clase y no por su posicion: asi la prueba mide
+    // el comportamiento, no la disposicion de la fila. (Con una fila por
+    // posicion, añadir una columna al panel haria fallar esta prueba sin que
+    // hubiera cambiado nada de lo que mide.)
+    const primeraFila = insp.$('spf-sliders')._children
+        .find((h) => (h._class || '').indexOf('spf-sl') !== -1);
+    const rng = primeraFila.querySelector('.spf-rng');
+    ok(rng !== null, 'la fila tiene un rango');
     const antes = Number(rng.value);
     const paso = Number(rng.step);
+    ok(paso > 0, 'con un paso real', paso);
 
     // Una rueda "hacia abajo" (deltaY > 0) tiene que RESTAR un paso: bajar el
     // scroll baja el numero. Al reves, seria el fallo de signo clasico, que no
-    // da error y hace que la rueda accelerates en vez de afinar.
+    // da error y hace que la rueda acelere en vez de afinar.
     insp.$('spf-sliders').dispatchEvent({ type: 'wheel', target: rng, deltaY: 120 });
     const despues = Number(rng.value);
     ok(Math.abs((antes - despues) - paso) < 1e-9,
-        'la rueda hacia abajo resta exactamente un paso', [antes, despues, paso]);
+        'la rueda hacia abajo resta exactamente un paso',
+        { antes, despues, paso, delta: antes - despues });
 
     // Y al reves suma.
     insp.$('spf-sliders').dispatchEvent({ type: 'wheel', target: rng, deltaY: -120 });
     const vuelta = Number(rng.value);
     ok(Math.abs(vuelta - antes) < 1e-9, 'y la de arriba lo devuelve', [antes, vuelta]);
 
-    // Y no se sale del rango.
+    // Y no se sale del rango: con el valor en el tope, una rueda de aproximacion
+    // no debe pasarse (un input[type=range] real lo recorta solo).
     rng.value = rng.max;
     insp.$('spf-sliders').dispatchEvent({ type: 'wheel', target: rng, deltaY: -120 });
     ok(Number(rng.value) <= Number(rng.max), 'no se pasa del maximo', rng.value);
@@ -400,8 +547,9 @@ run('la rueda FUERA de un slider no toca nada', () => {
     const insp = new I.AnimInspector({ model });
     O.clearAll();
     insp.open();
-    const filas = insp.$('spf-sliders')._children;
-    const rng = filas[0]._children[1];
+    const rng = insp.$('spf-sliders')._children
+        .find((h) => (h._class || '').indexOf('spf-sl') !== -1)
+        .querySelector('.spf-rng');
     const antes = Number(rng.value);
     insp.$('spf-sliders').dispatchEvent({
         type: 'wheel', target: insp.$('spf-sliders'), deltaY: 120
@@ -438,37 +586,67 @@ run('el boton de reset devuelve el valor del fichero', () => {
     O.clearAll();
     insp.open();
 
-    // Busca la fila que sea `base.hip` del jab de pie, para no depender del
-    // orden en que se recorren las claves del objeto.
-    const filas = insp.$('spf-sliders')._children;
-    let filaHip = null;
-    for (const f of filas) {
-        if (f._children[0] && f._children[0].textContent === 'base.hip') { filaHip = f; break; }
-    }
+    // Busca la fila por su ETIQUETA, para no depender ni del orden de las claves
+    // del objeto ni de la posicion de los hijos dentro de la fila.
+    //
+    // La lista se vuelve a leer en CADA busqueda, no se guarda: `refresh()`
+    // repinta el contenedor entero y construye filas nuevas, asi que una lista
+    // capturada antes apunta a nodos que ya no estan en el DOM. (La primera
+    // version de esta prueba lo hacia y fallaba por eso, no por el codigo.)
+    const buscar = () => {
+        for (const f of insp.$('spf-sliders').querySelectorAll('.spf-sl')) {
+            const lab = f.querySelector('.spf-sl-lab');
+            if (lab && lab.textContent === 'base.hip') return f;
+        }
+        return null;
+    };
+    const filas = insp.$('spf-sliders').querySelectorAll('.spf-sl');
+    const filaHip = buscar();
     ok(filaHip !== null, 'esta la fila de base.hip',
-        filas.slice(0, 6).map((f) => f._children[0] && f._children[0].textContent));
+        filas.slice(0, 6).map((f) => {
+            const l = f.querySelector('.spf-sl-lab');
+            return l && l.textContent;
+        }));
 
     if (filaHip) {
-        const original = filaHip._children[2].value;
+        const original = filaHip.querySelector('.spf-sl-num').value;
         O.setOverride('ATTACK_SILHOUETTES.JAB.STAND.base.hip', 0.55);
+        // Que la lectura de la fila y el override coincidan ANTES de repintar.
+        // Si aqui fallara, el fallo no estaria en el DOM sino en `filaDeLaVista`.
+        const f = I.filaDeLaVista(insp.view);
+        ok(f.raiz.base.hip === 0.55, 'la fila de la vista ya trae el override',
+            f.raiz.base.hip);
         insp.refresh();
-        // Tras el refresh el valor mostrado tiene que ser el del override.
-        const conParche = insp.$('spf-sliders')._children
-            .find((f) => f._children[0] && f._children[0].textContent === 'base.hip');
-        ok(Number(conParche._children[2].value) === 0.55,
-            'el slider muestra el valor del override', conParche._children[2].value);
-        ok((conParche._class || '').indexOf('mod') !== -1,
-            'y la fila se marca como modificada', conParche._class);
+        // Tras el refresh el valor mostrado tiene que ser el del override. Se
+        // vuelve a buscar la fila porque `refresh()` repinta la lista entera.
+        const conParche = buscar();
+        ok(conParche !== null, 'la fila sigue tras el repintado');
+        ok(Number(conParche.querySelector('.spf-sl-num').value) === 0.55,
+            'el slider muestra el valor del override',
+            conParche.querySelector('.spf-sl-num').value);
+        // La fila lleva en su etiqueta la ruta completa que el codigo compuso, asi
+        // que se puede ver QUE RUTA se comprobo al construirla. Y esa ruta tiene
+        // que ser la MISMA que la que el motor va a leer al aplicar el parche.
+        const titulo = conParche.querySelector('.spf-sl-lab').title.split('\n')[0];
+        ok(conParche.classList.contains('mod'),
+            'y la fila se marca como modificada',
+            JSON.stringify({ ruta: titulo, classList: conParche.classList.value }));
+        ok(titulo === 'ATTACK_SILHOUETTES.JAB.STAND.base.hip',
+            'la ruta lleva la familia y el contexto, no solo la tabla', titulo);
+        ok(O.overrideAt(titulo) === 0.55,
+            'y el override esta ahi (no en una ruta hermana)', O.overrideAt(titulo));
         // Y el reset lo devuelve.
-        const reset = conParche._children[4];
+        const reset = conParche.querySelector('.spf-sl-x');
+        ok(reset !== null, 'la fila tiene su boton de reset');
         reset.click();
         ok(O.overrideAt('ATTACK_SILHOUETTES.JAB.STAND.base.hip') === undefined,
             'el reset quita el override');
-        const trasReset = insp.$('spf-sliders')._children
-            .find((f) => f._children[0] && f._children[0].textContent === 'base.hip');
-        ok(Number(trasReset._children[2].value) === Number(original),
+        const trasReset = buscar();
+        ok(Number(trasReset.querySelector('.spf-sl-num').value) === Number(original),
             'y el slider vuelve al valor del fichero',
-            [original, trasReset._children[2].value]);
+            [original, trasReset.querySelector('.spf-sl-num').value]);
+        ok((trasReset._class || '').indexOf('mod') === -1,
+            'y ya no esta marcada como modificada', trasReset._class);
     }
     O.clearAll();
     insp.close();
@@ -489,14 +667,16 @@ run('cambiar de vista repinta y no rompe', () => {
         insp.apply();
         ok(model.poses.length > 0, `${kind}: se aplica una pose`);
         // En las vistas sin tabla de numeros (SUELO, LEVANTADA) no hay sliders,
-        // pero NO puede reventar: se dice con un texto y ya.
-        const sliders = insp.$('spf-sliders')._children;
-        ok(sliders.length >= 0, `${kind}: la lista de sliders existe`);
+        // pero NO puede reventar: se dice con un texto y ya. El texto cuenta
+        // como hijo del contenedor, asi que se miran solo las filas de slider
+        // (las que llevan la clase `spf-sl`), no todos los nodos.
+        const sliders = insp.$('spf-sliders')
+            .querySelectorAll('.spf-sl');
         if (kind === 'GROUND' || kind === 'WAKEUP') {
             ok(sliders.length === 0, `${kind}: no hay sliders (se edita en codigo)`,
                 sliders.length);
-            ok((insp.$('spf-sliders')._html || insp.$('spf-sliders').textContent || '').length > 0,
-                `${kind}: y se explica por que`);
+            ok(insp.$('spf-sliders')._html.indexOf('spf-vacio') !== -1,
+                `${kind}: y aparece el aviso de que no hay numeros`, insp.$('spf-sliders')._html);
         } else {
             ok(sliders.length > 0, `${kind}: hay sliders`, sliders.length);
         }
@@ -516,7 +696,7 @@ run('la matriz de reacciones da los 9 conjuntos de sliders', () => {
             insp.view.height = height;
             insp.view.power = power;
             insp.refresh();
-            const n = insp.$('spf-sliders')._children.length;
+            const n = insp.$('spf-sliders').querySelectorAll('.spf-sl').length;
             if (n > 0) conSliders++;
         }
     }
@@ -529,23 +709,24 @@ run('el aviso de alcance aparece cuando el objetivo no se alcanza', () => {
     const insp = new I.AnimInspector({ model });
     O.clearAll();
     insp.open();
-    // Con la tabla buena: sin aviso.
+    // Con la tabla buena: sin aviso de alarma.
     insp.apply();
     const cont = insp.$('spf-alcance');
-    ok(cont._children.length > 0, 'hay algo en el hueco del aviso');
-    ok((cont._children[0]._class || '').indexOf('ok') !== -1,
-        'y dice que es alcanzable', cont._children[0]._class);
+    ok(cont.querySelectorAll('.spf-rd').length > 0, 'hay algo en el hueco del aviso');
+    ok(cont.querySelector('.spf-rd').classList.contains('ok'),
+        'y dice que es alcanzable', cont._html);
+    ok(cont.querySelectorAll('.spf-alc-nota').length === 0,
+        'sin el aviso de "no llega"', cont._html);
 
     // Con un objetivo imposible: aviso rojo con la magnitud de lo que falta.
     O.setOverride('ATTACK_SILHOUETTES.JAB.STAND.armL.active.2', 1.20);
     insp.apply();
     const cont2 = insp.$('spf-alcance');
-    ok(cont2._children.length > 1, 'sale el aviso con su explicacion',
-        cont2._children.length);
-    ok((cont2._children[0]._class || '').indexOf('bad') !== -1,
-        'en rojo', cont2._children[0]._class);
-    ok((cont2._children[1]._class || '').indexOf('spf-alc-nota') !== -1,
-        'con el texto que dice cuanto falta');
+    ok(cont2.querySelector('.spf-rd').classList.contains('bad'),
+        'en rojo', cont2._html);
+    ok(cont2.querySelectorAll('.spf-alc-nota').length === 1,
+        'con el texto que dice cuanto falta', cont2._html);
+    ok(cont2._html.indexOf('m') !== -1, 'y el texto lleva la unidad');
     O.clearAll();
     insp.close();
 });
@@ -585,10 +766,13 @@ run('DESCARTAR vacia el parche y repinta', () => {
     insp.refresh();
     insp.$('spf-reset').click();
     ok(O.overrideCount() === 0, 'el parche queda vacio');
-    const fila = insp.$('spf-sliders')._children
-        .find((f) => f._children[0] && f._children[0].textContent === 'base.hip');
-    ok(fila !== undefined, 'y la fila sigue ahi');
-    ok((fila._class || '').indexOf('mod') === -1, 'ya sin la marca de modificada',
+    let fila = null;
+    for (const f of insp.$('spf-sliders').querySelectorAll('.spf-sl')) {
+        const lab = f.querySelector('.spf-sl-lab');
+        if (lab && lab.textContent === 'base.hip') { fila = f; break; }
+    }
+    ok(fila !== null, 'y la fila sigue ahi');
+    ok(!fila.classList.contains('mod'), 'ya sin la marca de modificada',
         fila._class);
     insp.close();
 });
@@ -632,12 +816,26 @@ run('tick() avanza el scrubber solo si esta reproduciendo', () => {
     insp.tick(0.5);
     ok(insp.view.t > 0, 'reproduciendo avanza', insp.view.t);
 
-    // Y da la vuelta al llegar al final (si no, se queda parado en 1 y parece
-    // que el play no funciona).
+    // Y da la vuelta al llegar al final. Se comprueba en varios saltos, porque el
+    // fallo del `t -= 1` (en vez de `t % 1`) solo aparece cuando el frame es
+    // largo: con `speed` alta o con la pestaña en segundo plano, un solo
+    // `tick` puede pasar de 1 y restar 1 deja el valor FUERA de rango, con el
+    // scrubber clavado y la reproduccion parada.
+    const saltos = [];
+    for (const dt of [0.5, 1.0, 2.0, 5.0]) {
+        insp.view.t = 0.999;
+        insp.tick(dt);
+        saltos.push([dt, insp.view.t]);
+    }
+    ok(saltos.every(([, t]) => t >= 0 && t < 1),
+        'con frames largos sigue en 0..1 y no se clava en el tope', saltos);
+
+    // Y con la velocidad al doble tampoco.
+    insp.speed = 2;
     insp.view.t = 0.999;
     insp.tick(1.0);
-    ok(insp.view.t < 1, 'y vuelve al principio en vez de quedarse en 1',
-        insp.view.t);
+    ok(insp.view.t >= 0 && insp.view.t < 1, 'tampoco con speed = 2', insp.view.t);
+    insp.speed = 1;
     insp.close();
 });
 
@@ -684,7 +882,7 @@ run('onZoom se llama con la delta de la rueda sobre la escena', () => {
     insp.el.dispatchEvent({ type: 'wheel', target: insp.el, deltaY: -120 });
     ok(z === 0, 'la de arriba acerca', z);
     // Y sobre un slider NO debe llegar a la camara (ahi manda el ajuste).
-    const rng = insp.$('spf-sliders')._children[0]._children[1];
+    const rng = insp.$('spf-sliders').querySelector('.spf-rng');
     const z0 = z;
     insp.el.dispatchEvent({ type: 'wheel', target: rng, deltaY: 120 });
     ok(z === z0, 'sobre un slider no toca la camara', [z0, z]);

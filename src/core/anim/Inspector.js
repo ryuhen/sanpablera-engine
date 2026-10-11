@@ -89,13 +89,35 @@ export function pose(model, view) {
     const rig = model.rig;
     const t = Math.max(0, Math.min(1, view.t || 0));
 
-    let res, move = null;
+    let res, move = null, attackKey = null;
 
     if (view.kind === 'ATTACK') {
         // El frame data REAL del golpe. No se inventa: son los mismos numeros
         // que usa el combate, asi que el inspector no puede mentir sobre
         // cuantos frames dura el amago.
         move = CORE_MOVES[view.moveKey] || CORE_MOVES.ATAQUE_LIGERO;
+        // El `attack` que se pasa a `poseFor` tiene que ser EL MISMO que se
+        // acaba de resolver, no `view.moveKey` en crudo.
+        //
+        // POR QUE (fallo real, no teorico)
+        //   Arriba se resuelve el golpe con una reserva: si la vista no trae
+        //   `moveKey`, se enseña ATAQUE_LIGERO. Pero el `attack` que se le pasa
+        //   a `poseFor` iba en crudo, y `poseFor` decide si hay golpe con
+        //     const inAttack = groups.indexOf('ATTACKING') !== -1 && snap.attack;
+        //   Con `attack` a undefined, `inAttack` es falso y el dispatcher se va
+        //   por la postura neutra. Entonces el inspector decia "estas viendo
+        //   ATAQUE_LIGERO" mientras de verdad pintaba la postura en reposo.
+        //   Y como la postura en reposo no lee NINGUN numero de
+        //   ATTACK_SILHOUETTES, mover un slider no cambiaba nada: el ajuste se
+        //   guardaba bien y no se notaba, que es la forma mas dificil de
+        //   fallo que tiene este panel.
+        //
+        //   La reserva se aplica SOLO cuando falta la clave. Si viene una
+        //   clave que `CORE_MOVES` no tiene (hay golpes que la tabla no
+        //   declara y aun asi son validos para `attackPoseFor`), se respeta la
+        //   que pidio la vista: el combate pasa el `attack` tal cual, y el
+        //   inspector tiene que hacer lo mismo o dejaria de reflejarlo.
+        attackKey = view.moveKey || move.key;
         // Se llama a `poseFor` y NO a `attackPoseFor` directamente.
         //
         // POR QUE (es la decision de codigo mas importante de este archivo)
@@ -116,7 +138,7 @@ export function pose(model, view) {
             phase: 'GROUND',
             groups: ['ATTACKING'],
             context: view.context,
-            attack: view.moveKey,
+            attack: attackKey,
             attackPhase: view.phase,
             attackT: t
         }, {});
@@ -161,10 +183,14 @@ export function pose(model, view) {
  */
 export function objetivoDeLaVista(view, model) {
     if (view.kind !== 'ATTACK') return null;
-    const T = liveSilhouettes();
-    const sil = T[view.family] || T.JAB;
-    const fila = sil[view.context] || sil.STAND;
-    const K = fila.armL || fila.legL;
+    // Se reutiliza `filaDeLaVista` en vez de repetir aqui la resolucion de
+    // familia y contexto. Repetirla es justo lo que permitio el bug del
+    // prefijo: las dos copias caian en la misma fila, pero solo una estaba
+    // corregida, asi que cualquier cambio en una dejaba a la otra mirando una
+    // fila distinta.
+    const fila = filaDeLaVista(view);
+    if (!fila) return null;
+    const K = fila.raiz.armL || fila.raiz.legL;
     if (!K) return null;
     return K[view.phase === 'ACTIVE' ? 'active'
         : view.phase === 'STARTUP' ? 'startup' : 'active'] || null;
@@ -259,20 +285,47 @@ export function alcanceDe(state, objetivo, alcance) {
 export function filaDeLaVista(view) {
     if (view.kind === 'ATTACK') {
         const T = liveSilhouettes();
-        const sil = T[view.family] || T.JAB;
+        // La familia y el contexto se resuelven CON FALLBACK explicito, no
+        // presuponiendo que existen. `sil[ctx]` puede ser undefined si la vista
+        // pide un contexto raro, y el prefijo de la ruta tiene que ser el
+        // MISMO camino que luego se lee; si uno dice STAND y el otro no, el
+        // override se guarda en una tabla y se busca en otra.
+        const familia = T[view.family] ? view.family : 'JAB';
+        const sil = T[familia];
+        const ctx = sil[view.context] ? view.context : 'STAND';
         return {
-            tabla: 'ATTACK_SILHOUETTES',
-            raiz: sil[view.context] || sil.STAND,
+            // EL PREFIJO COMPLETO DE LA RUTA, NO SOLO EL NOMBRE DE LA TABLA.
+            //
+            // Este es el bug mas caro que ha tenido el inspector, y solo se ve
+            // mirando la ruta que compone el codigo. `merge()` (Overrides.js)
+            // busca las claves del parche por prefijo de tabla y las escribe
+            // dentro de una copia con `writePath`. Con el prefijo corto
+            // (`ATTACK_SILHOUETTES`) el parche se guardaba en
+            // `ATTACK_SILHOUETTES.base.hip`, que NO es una clave de la tabla:
+            // `writePath` la creaba de la nada en la copia y, como la copia solo
+            // se rehace cuando cambia la VERSION, el valor desaparecia al
+            // siguiente ajuste de otra ruta.
+            //
+            // El efecto era desconcertante porque la mitad del efecto SI se
+            // veia: `readPath` leia de la copia parcheada y por eso el slider
+            // mostraba 0,55 mientras el fichero decia 0,86. El motor lo
+            // aplicaba porque su ruta y la del inspector acababan en el mismo
+            // sitio por caminos distintos. Mover un slider se veia; mover el
+            // siguiente lo hacia perder.
+            tabla: 'ATTACK_SILHOUETTES.' + familia + '.' + ctx,
+            raiz: sil[ctx],
             nota: 'la extension de la vista depende tambien de ' +
-                'ATTACK_BASES.' + view.context
+                'ATTACK_BASES.' + ctx
         };
     }
     if (view.kind === 'REACTION') {
         const T = liveReactions();
-        const alto = T[view.height] || T.MEDIO;
+        const altura = T[view.height] ? view.height : 'MEDIO';
+        const fila = T[altura];
+        const potencia = fila[view.power] ? view.power : 'MEDIO';
         return {
-            tabla: 'HIT_REACTIONS',
-            raiz: alto[view.power] || alto.MEDIO,
+            tabla: 'HIT_REACTIONS.' + altura + '.' + potencia,
+            raiz: fila[potencia],
             nota: ''
         };
     }
@@ -372,7 +425,17 @@ export class AnimInspector {
         if (!this.isOpen()) return;
         if (this.playing) {
             this.view.t += dt * this.speed * 1.2;
-            if (this.view.t > 1) this.view.t -= 1;
+            // Da la vuelta con el RESTO, no restando 1 entero.
+            //
+            // Con un `dt` grande (una pestaña que ha estado en segundo plano y
+            // vuelve con deltaTime de medio segundo) `t += 0,6` desde 0,999
+            // deja 1,599 y `t -= 1` la deja en 0,599: funciona. Pero desde
+            // t = 0,5 con dt = 1,0 son 1,7 y quedan 0,7... tambien funciona.
+            // El fallo real es cuando el resto es mayor que 1: con
+            // `speed` a 2 y un frame lento, `t` puede pasarse de 2 y restar 1
+            // solo lo deja en >1, con la barra del scrubber clavada en el
+            // tope y la reproduccion parada ahi. El `%` lo resuelve siempre.
+            this.view.t = this.view.t % 1;
             this._syncT();
         }
         this.apply();

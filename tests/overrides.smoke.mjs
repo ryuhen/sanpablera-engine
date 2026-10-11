@@ -340,18 +340,140 @@ run('rangeFor da unidades coherentes', () => {
 run('la vista sabe que fila de la tabla es', () => {
     O.clearAll();
     const ataque = I.filaDeLaVista({ kind: 'ATTACK', family: 'JAB', context: 'CROUCH' });
-    ok(ataque.tabla === 'ATTACK_SILHOUETTES', 'el golpe sale de ATTACK_SILHOUETTES');
+    // EL PREFIJO DE LA RUTA TIENE QUE LLEVAR FAMILIA Y CONTEXTO
+    //
+    // Este es el bug mas caro que tuvo el inspector, y no se veia en el
+    // resultado de la pose: con el prefijo corto (`ATTACK_SILHOUETTES`) el
+    // parche se guardaba en `ATTACK_SILHOUETTES.base.hip`, una clave que no
+    // existe en la tabla. `merge()` la creaba de la nada en su copia, asi que
+    // el slider SI mostraba el valor nuevo (leia de la copia) pero el cambio se
+    // perdia en cuanto se tocaba otra ruta. Se perdia la mitad del efecto sin
+    // que nada fallara.
+    ok(ataque.tabla === 'ATTACK_SILHOUETTES.JAB.CROUCH',
+        'el golpe da la ruta completa (tabla.familia.contexto)',
+        ataque.tabla);
     ok(ataque.raiz === AP.ATTACK_SILHOUETTES.JAB.CROUCH, 'y de la fila correcta',
         ataque.raiz && Object.keys(ataque.raiz).join(','));
     ok(O.numericPaths(ataque.raiz).length > 0, 'que tiene numeros');
 
     const reaccion = I.filaDeLaVista({ kind: 'REACTION', height: 'ALTO', power: 'FUERTE' });
-    ok(reaccion.tabla === 'HIT_REACTIONS', 'la reaccion sale de HIT_REACTIONS');
+    ok(reaccion.tabla === 'HIT_REACTIONS.ALTO.FUERTE',
+        'la reaccion tambien da la ruta completa', reaccion.tabla);
     ok(reaccion.raiz === HR.HIT_REACTIONS.ALTO.FUERTE, 'de la fila correcta');
 
     // La levantada y los golpes de suelo NO tienen tabla (estan en funciones).
     ok(I.filaDeLaVista({ kind: 'WAKEUP' }) === null, 'la levantada no tiene tabla');
     ok(I.filaDeLaVista({ kind: 'GROUND' }) === null, 'los golpes de suelo tampoco');
+});
+
+run('una vista con familia o contexto raros cae en una fila REAL', () => {
+    O.clearAll();
+    // El prefijo tiene que describir la fila que se LEE, no la que se pidio. Si
+    // el panel guardara el override en `ATTACK_SILHOUETTES.PEPTITO.STAND.base.hip`
+    // y leyera `ATTACK_SILHOUETTES.JAB.STAND`, el ajuste se perderia otra vez,
+    // y con un nombre de familia equivocado ni se sabria por que.
+    const raro = I.filaDeLaVista({ kind: 'ATTACK', family: 'PEPTITO', context: 'TANGO' });
+    ok(raro.tabla === 'ATTACK_SILHOUETTES.JAB.STAND',
+        'cae a JAB.STAND en el prefijo', raro.tabla);
+    ok(raro.raiz === AP.ATTACK_SILHOUETTES.JAB.STAND, 'y en los datos');
+
+    // Y el caso normal, con los cinco contextos y familias de verdad.
+    for (const fam of ['JAB', 'GANCHO', 'UPPERCUT', 'KICK', 'SWEEP']) {
+        for (const ctx of ['STAND', 'CROUCH', 'AIR', 'DOWN']) {
+            const f = I.filaDeLaVista({ kind: 'ATTACK', family: fam, context: ctx });
+            ok(f.tabla === 'ATTACK_SILHOUETTES.' + fam + '.' + ctx,
+                `${fam}/${ctx}: el prefijo es el suyo`, f.tabla);
+            ok(f.raiz === AP.ATTACK_SILHOUETTES[fam][ctx],
+                `${fam}/${ctx}: y los datos son los suyos`);
+        }
+    }
+});
+
+run('el override que sale del panel LLEGA al motor (ida y vuelta completa)', () => {
+    O.clearAll();
+    // Esta es la prueba que faltaba y que habria caught el bug del prefijo: no
+    // basta con que el panel se pinte, tiene que PINCHADO == lo que el motor
+    // lee. Se recorre el ciclo entero del inspector menos el DOM.
+    const model = { rig };
+    // `moveKey` va explicito a proposito: sin el, la vista cae en la reserva
+    // de ATAQUE_LIGERO. Se comprobara esa reserva por separado, porque es justo
+    // lo que rompia antes (la reserva se resolvia para el frame data pero NO
+    // para el `attack` que se le pasa a `poseFor`).
+    const vista = {
+        kind: 'ATTACK', family: 'JAB', context: 'STAND',
+        moveKey: 'ATAQUE_LIGERO', phase: 'ACTIVE', t: 1
+    };
+
+    for (const [ruta, valor] of [
+        ['ATTACK_SILHOUETTES.JAB.STAND.base.hip', 0.60],
+        ['ATTACK_SILHOUETTES.JAB.STAND.armL.active.2', 0.35],
+        ['ATTACK_SILHOUETTES.JAB.STAND.armL.active.1', 1.05]
+    ]) {
+        O.setOverride(ruta, valor);
+
+        // 1. El panel ha de leer EXACTAMENTE lo que se ha puesto.
+        const f = I.filaDeLaVista(vista);
+        ok(O.readPath(f.raiz, ruta.split('ATTACK_SILHOUETTES.JAB.STAND.').join('')) === valor,
+            `${ruta}: el panel lee el valor nuevo`);
+        ok(O.overrideAt(ruta) === valor, `${ruta}: y lo tiene en el parche`);
+
+        // 2. Y la tabla que el motor va a fusionar tiene que traerlo tambien.
+        //    OJO: se lee con `readPath` y NO con `tabla[a][b][c.d]`. Un indice
+        //    de corchetes con puntos DENTRO busca una clave literalmente
+        //    llamada 'base.hip', que no existe: la tabla guarda `base` y `hip`
+        //    en dos niveles. Esa lectura sale `undefined` siempre, y por eso
+        //    esta comprobacion fallaba aunque el motor hiciera todo bien.
+        const fusionada = AP.liveSilhouettes();
+        const partes = ruta.split('.');
+        ok(O.readPath(fusionada[partes[1]][partes[2]], partes.slice(3).join('.')) === valor,
+            `${ruta}: la tabla del motor lo lleva`);
+
+        // 3. Y la pose tiene que cambiar.
+        const antes = I.pose(model, vista).state.p;
+        O.setOverride(ruta, valor + 0.03);
+        const despues = I.pose(model, vista).state.p;
+        ok(JSON.stringify(antes) !== JSON.stringify(despues),
+            `${ruta}: moverla cambia la pose`);
+        O.setOverride(ruta, valor);
+    }
+    O.clearAll();
+});
+
+run('una vista SIN moveKey tambiene enseña un golpe (la reserva llega entera)', () => {
+    O.clearAll();
+    const model = { rig };
+    // ESTE es el caso que rompia antes, y no lo cubria ninguna comprobacion.
+    //
+    // `Inspector.pose` resolvia el golpe con reserva (`CORE_MOVES[view.moveKey]
+    // || CORE_MOVES.ATAQUE_LIGERO`) para poder enseñar el frame data, pero
+    // pasaba `attack: view.moveKey` EN CRUDO a `poseFor`. Con la vista sin
+    // `moveKey`, `poseFor` recibia `attack: undefined`, su guarda
+    //     const inAttack = groups.indexOf('ATTACKING') !== -1 && snap.attack;
+    // daba falsa y el panel pintaba la POSTURA EN REPOSO.
+    //
+    // El fallo era invisible en la pantalla (una guardia quieta parece una
+    // animacion mas) y hacia que un slider se moviera sin que pasara nada:
+    // el numero se guardaba bien, pero la postura en reposo no lee ninguno de
+    // los numeros de ATTACK_SILHOUETTES.
+    const sinClave = { kind: 'ATTACK', family: 'JAB', context: 'STAND', phase: 'ACTIVE', t: 1 };
+    const conClave = { ...sinClave, moveKey: 'ATAQUE_LIGERO' };
+
+    const p1 = I.pose(model, sinClave);
+    const p2 = I.pose(model, conClave);
+
+    ok(p1.move.key === 'ATAQUE_LIGERO', 'el frame data cae en la reserva', p1.move && p1.move.key);
+    ok(JSON.stringify(p1.state.p) === JSON.stringify(p2.state.p),
+        'y la pose es la MISMA que si se hubiera pedido ATAQUE_LIGERO a mano');
+    ok(JSON.stringify(p1.state.p) !== JSON.stringify(I.pose(model, { ...sinClave, context: 'CROUCH' }).state.p),
+        'y no es la postura en reposo (eso si seria el fallo)');
+
+    // Y el punto que de verdad importa: un ajuste tiene que notarse.
+    O.setOverride('ATTACK_SILHOUETTES.JAB.STAND.base.hip', 0.60);
+    const antes = JSON.stringify(I.pose(model, sinClave).state.p);
+    O.setOverride('ATTACK_SILHOUETTES.JAB.STAND.base.hip', 0.63);
+    ok(antes !== JSON.stringify(I.pose(model, sinClave).state.p),
+        'mover un slider sin moveKey TAMBIEN cambia la pose');
+    O.clearAll();
 });
 
 run('la vista de la tabla cambia con el override puesto', () => {
