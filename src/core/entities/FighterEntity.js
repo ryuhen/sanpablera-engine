@@ -462,6 +462,17 @@ export class FighterEntity {
      */
     _locomotion(dt, input, world, extra) {
         const L = this.loco;
+
+        // `dir` y `stateTime` son la base de la maquina. Si alguien la
+        // sustituye por un objeto de otra forma (que es lo que hacia el motor
+        // con el descriptor del toque), la siguiente linea no falla: lo
+        // repone. Un fallo aqui cae DENTRO del bucle de render y para el
+        // juego entero, asi que esta comprobacion vale mas que los tres
+        // campos que repone.
+        if (!L.dir) L.dir = { x: 0, z: 0 };
+        if (typeof L.stateTime !== 'number' || !isFinite(L.stateTime)) L.stateTime = 0;
+        if (!L.state) L.state = 'IDLE';
+
         L.stateTime += dt;
 
         const canAct = this.fsm.state.control.canAct &&

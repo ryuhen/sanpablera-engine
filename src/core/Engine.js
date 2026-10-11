@@ -999,8 +999,30 @@ function render() {
 
     // El boton de mover se lee aparte: es lo que distingue un paso por toque
     // de mantener y andar (core/locomotion.js).
-    const loco = readMoveInput(inputMapper.time);
-    if (entities[0]) entities[0].loco = loco;
+    //
+    // OJO: esto NO se puede asignar a `entities[0].loco`. `loco` es la MAQUINA
+    // de locomocion (state, stateTime, dir, dashUsed, dodgeUntil...) y
+    // `readMoveInput` devuelve un DESCRIPTOR de tres campos. Sustituir uno por
+    // otro rompeva el motor de dos maneras a la vez, y las dos son graves:
+    //
+    //   1. `L.dir` dejaba de existir, y al mover (que es lo unico que salta
+    //      esa rama) `_locomotion` petaba en `L.dir.x`. La excepcion caia
+    //      DENTRO del bucle de render, asi que Babylon dejaba de pintar: la
+    //      pantalla se congelaba al mover.
+    //   2. `loco.state` pasaba a ser `undefined`, y `LOCO_POSTURES[undefined]`
+    //      cae en IDLE: los dos peleadores se quedaban SIEMPRE en la pose de
+    //      reposo, sin caminar ni correr nunca.
+    //
+    // El resultado del toque se guarda en campos propios. `readLoco` mantiene
+    // su memoria (toque/ mantener) en `locoState`, asi que esa parte sigue
+    // funcionando igual; lo unico que cambia es donde se deja el resultado.
+    const toque = readMoveInput(inputMapper.time);
+    const L = entities[0] && entities[0].loco;
+    if (L) {
+        L.tapKind = toque.kind;
+        L.tapDirX = toque.dirX;
+        L.tapDirZ = toque.dirZ;
+    }
 
     // --- Boton multiple ---------------------------------------------------
     updateActionButton(input, dt);
