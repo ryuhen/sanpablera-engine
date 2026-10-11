@@ -198,6 +198,10 @@ export {
 
 export { default as Cloth } from '../../core/cloth/Cloth.js';
 export { BLEND, EASE, PoseBlender, blendFor, pesoDe } from '../../core/anim/Blend.js';
+export {
+    crearBiblioteca as crearClips, tDeClip, poseDe as poseDeClip, fichaDe as clipDe,
+    tieneClip, nombres as nombresDeClip, cobertura as coberturaDeClips
+} from '../../core/anim/ClipLibrary.js';
 
 // ---------------------------------------------------------------------------
 // CONTROLES
@@ -221,7 +225,7 @@ export const SYSTEM_STATUS = Object.freeze({
     STANCE: { done: true, note: 'estancias, arbol de golpe por postura y derivacion de comandos' },
     IMPACT: { done: true, note: 'hitbox por golpe, altura, zonas y knockback' },
     FRAMEDATA: { done: true, note: 'startup/active/recovery, hitAdvantage, blockAdvantage e indice O(1)' },
-    CANCEL: { done: false, note: 'tabla, transiciones y blending de clips hechos; falta el encadenado real golpe-en-recuperacion' },
+    CANCEL: { done: false, note: 'tabla, transiciones, blending y biblioteca de clips (26 clips de pie/agachado/salto/golpes) hechos; falta el encadenado real golpe-en-recuperacion' },
     CLASH: { done: true, note: 'ataque x defensa, explotacion RPS, guardia y evasion por aire/pisoton' },
     GUARD_IK: { done: false, note: 'el IK coloca la guardia; falta la DEFLEXION que busca la extremidad' },
     GRAPPLE: { done: true, note: '30 estados uke/tori; faltan las variantes por disciplina y la cinematica' },

@@ -63,6 +63,14 @@ const esperados = {
     blendFor: 'funcion',
     BLEND: 'objeto',
     EASE: 'objeto',
+    // clips
+    crearClips: 'funcion',
+    poseDeClip: 'funcion',
+    clipDe: 'funcion',
+    tieneClip: 'funcion',
+    nombresDeClip: 'funcion',
+    coberturaDeClips: 'funcion',
+    tDeClip: 'funcion',
     // suelo posicional
     resolverSuelo: 'funcion',
     castigoDe: 'funcion',
