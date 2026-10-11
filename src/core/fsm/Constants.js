@@ -133,6 +133,11 @@ const RAIZ = (typeof window !== 'undefined' ? window : globalThis);
         TROPEZON: 18,
         RODANDO: 19,
         ACROBACIA: 20,
+        // OJO: `AL_SUELO` NO va aqui. Este bloque es el enum de ESTADOS, y
+        // `validateCatalog()` recorre sus claves exigiendo que cada una tenga
+        // un estado registrado: escribir un intent aqui mete una clave que no
+        // existe como estado y el catalogo se declara incompleto.
+        // El intent vive en `Intent`, mas abajo.
 
         // --- 3. AEREOS Y JUGGLE --------------------------------------------
         SALTO_NORMAL_A: 30,
@@ -156,6 +161,11 @@ const RAIZ = (typeof window !== 'undefined' ? window : globalThis);
         // mas abajo (ver buildKnockdownStates) para no duplicar 8 bloques
         // identicos de configuracion.
         SUELO_TUMBADO_BOCA_ABAJO: 43,
+        // Pecho a tierra VOLUNTARIO (doble ABAJO + guardia). Numero propio,
+        // justo detras de la levantada desde pecho tierra. NO es un estado de
+        // agarre (90-99 estan usados) ni de peleador (100+), asi que vive
+        // junto a los demas estados de suelo.
+        PECHO_TIERRA: 47,
         SUELO_TUMBADO_BOCA_ARRIBA: 44,
         LEVANTANDOSE_DESDE_AGACHADO: 45,
         LEVANTANDOSE_DESDE_PECHO_TIERRA: 46,
@@ -313,6 +323,10 @@ const RAIZ = (typeof window !== 'undefined' ? window : globalThis);
         SPRINT: 'SPRINT',
         ACROBACIA: 'ACROBACIA',
         TECNICA: 'TECNICA',
+        // Tirarse al suelo a proposito (doble abajo + guardia). No es lo mismo
+        // que un derribo: aqui el jugador decide, y por eso el estado de
+        // destino puede dejarle actuar (gateo, deslizamiento, rodada).
+        AL_SUELO: 'AL_SUELO',
         CANCEL: 'CANCEL'     // Any-Point Cancel explicito
     };
 

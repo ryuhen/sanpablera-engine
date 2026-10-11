@@ -289,6 +289,135 @@ run('el snapshot dice si la guardia esta puesta', () => {
     ok(p.snap().guard === false, 'al soltar');
 });
 
+// ===========================================================================
+section('5 · Los movimientos de suelo');
+// ===========================================================================
+
+/** Doble ABAJO con la guardia puesta: el gesto de tirarse al suelo. */
+function tirarAlSuelo(p, n = 3) {
+    p.set({ down: true }, { block: true });
+    p.step(n);
+    p.set({ down: false }, { block: true });
+    p.step(2);
+    p.set({ down: true }, { block: true });
+    p.step(n);
+}
+
+run('doble ABAJO + guardia -> pecho a tierra', () => {
+    const p = partida();
+    p.step(2);
+    tirarAlSuelo(p);
+    ok(p.state === SPF.State.PECHO_TIERRA,
+        'llega al estado de pecho a tierra', p.state);
+    ok(p.e.fsm.state.voluntary === true,
+        'marcado como voluntario (el jugador lo ha pedido)', p.e.fsm.state.voluntary);
+});
+
+run('guardia + abajo a secas sigue siendo GUARDIA BAJA, no el suelo', () => {
+    // El suelo es el gesto CON INTENCION (doble toque). Mantener el pulgar
+    // abajo un rato mas no puede ser otra cosa.
+    const p = partida();
+    p.step(2);
+    p.set({ down: true }, { block: true });
+    p.step(20);
+    ok(p.state === SPF.State.AGACHADO_GUARDIA_BAJA,
+        'un solo toque prolonged es agacharse', p.state);
+});
+
+run('el suelo NO se levanta solo, pero un derribo SI', () => {
+    // La diferencia entre tirarse al suelo y que te tiren. Si el estado
+    // voluntario se levantara solo a los 8 frames, la jugada duraria un
+    // parpadeo y no serviria para nada.
+    const p = partida();
+    p.step(2);
+    tirarAlSuelo(p);
+    p.set({}, {});
+    p.step(40);
+    ok(p.state === SPF.State.PECHO_TIERRA,
+        'tras 40 frames sigue en el suelo voluntarily', p.state);
+
+    const q = partida();
+    q.step(2);
+    q.e.fsm.changeState(SPF.State.SUELO_TUMBADO_BOCA_ABAJO,
+        { source: 'TEST', reason: 'knockdown' });
+    q.set({}, {});
+    q.step(40);
+    ok(q.state !== SPF.State.SUELO_TUMBADO_BOCA_ABAJO,
+        'pero un derribo se levanta solo', q.state);
+});
+
+run('ARRIBA desde el suelo = levantarse', () => {
+    const p = partida();
+    p.step(2);
+    tirarAlSuelo(p);
+    ok(p.state === SPF.State.PECHO_TIERRA, 'en el suelo', p.state);
+    p.set({ up: true }, { block: true });
+    p.step(3);
+    ok(p.state === SPF.State.LEVANTANDOSE_DESDE_PECHO_TIERRA,
+        'arriba levanta', p.state);
+    p.step(30);
+    ok(p.state !== SPF.State.PECHO_TIERRA && !p.airborne,
+        'y se queda de pie', p.state);
+});
+
+run('ACCION desde el suelo: la direccion elige el movimiento', () => {
+    // Gateo, deslizamiento y rodada son la misma idea con distinto riesgo.
+    // Elegirlos con la cruceta es lo coherente con el resto del juego: la
+    // direccion ya elige el golpe, ahora elige como te mueves tumbado.
+    //
+    // En esta prueba el rival esta DEFRENTE (ver CAM/RIVAL arriba), asi que
+    // ARRIBA de la cruceta es "hacia el rival" y ABAJO es "alejandose".
+    const casos = [
+        [{}, SPF.State.CUADRUPEDA, 'sin direccion -> gateo'],
+        [{ up: true }, SPF.State.DESLIZAMIENTO, 'hacia el rival -> deslizamiento'],
+        [{ down: true }, SPF.State.RODANDO, 'alejandose -> rodada']
+    ];
+    for (const [dpad, esperado, nombre] of casos) {
+        const p = partida();
+        p.step(2);
+        tirarAlSuelo(p);
+        p.set(dpad, { action: true, block: true });
+        p.step(3);
+        ok(p.state === esperado, nombre, [p.state, esperado]);
+    }
+});
+
+run('el deslizamiento va HACIA el rival, no en la direccion del pulgar', () => {
+    const p = partida();
+    p.step(2);
+    tirarAlSuelo(p);
+    p.set({ up: true }, { action: true, block: true });
+    p.step(3);
+    ok(p.state === SPF.State.DESLIZAMIENTO, 'es deslizamiento', p.state);
+    // El rival esta en +x y el peleador en -x: la direccion del deslizamiento
+    // tiene que apuntar hacia +x.
+    ok(p.e.loco.dir.x > 0.5, 'y va hacia el', p.e.loco.dir);
+});
+
+run('el suelo tiene PRECIO: el rival puede castigarlo', () => {
+    // Esta es la comprobacion que evita que esto sea una esquiva gratis. El
+    // estado esta en el grupo DOWNED a proposito: `_downAttack` del rival lo
+    // puede golpear en el suelo. Si estuviera fuera, tumbarse seria gratis.
+    const p = partida();
+    p.step(2);
+    tirarAlSuelo(p);
+    ok(p.e.fsm.inGroup(SPF.StateGroup.DOWNED),
+        'pecho a tierra esta en el grupo DOWNED');
+
+    // Se pregunta desde el RIVAL, que es como lo hace el motor: el que esta
+    // en el suelo es la victima, y el castigo se pide mirando el estado de
+    // la victima mientras el otro esta golpeando.
+    const rival = p.world.opponentOf(p.e);
+    rival.fsm.changeState(SPF.State.ATAQUE_LIGERO,
+        { source: 'TEST', reason: 'atacando' });
+    ok(rival.fsm.inGroup(SPF.StateGroup.ATTACKING), 'el rival esta golpeando');
+    const castigo = rival._downAttack(p.e);
+    ok(castigo !== null && castigo !== undefined,
+        'y le sale una silueta de castigo al caido', castigo);
+    ok(['PIE', 'MANOS', 'SALTAR', 'PESADO'].indexOf(castigo) !== -1,
+        'que es una de las cuatro de golpear al suelo', castigo);
+});
+
 console.log('\n================================================================');
 if (fails.length) {
     console.log(`FALLOS (${fails.length}):`);

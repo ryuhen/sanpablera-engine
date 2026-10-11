@@ -117,6 +117,20 @@ export function defineState(def) {
             axis: FacingAxis.PIES_A_RIVAL
         }, def.down || {})),
 
+        // ¿El peleador SE HA TIRADO al suelo a proposito?
+        //
+        // POR QUE ESTA EN EL CONTRATO Y NO COMO UN CAMPO SUELTO
+        //   `defineState` construye el estado con una lista explicita de
+        //   campos: lo que no este aqui, NO LLEGA. Un `voluntary: true` escrito
+        //   en la definicion del estado se pierde en silencio y el motor se
+        //   comporta como si no estuviera. Por eso el campo se declara aqui y
+        //   no se cuela por la puerta de atras.
+        //
+        //   Lo lee `_systemIntents`: tras un derribo el cuerpo se levanta solo a
+        //   los pocos frames, pero si el peleador se ha tumbado el para hacer
+        //   una jugada, levantarselo solo learia la jugada.
+        voluntary: !!def.voluntary,
+
         // Agarre: papel (UKE/TORI), postura y las 4 acciones del agarre
         // (atacar / escapar / proyectar / sumision) con sus clips. Solo lo
         // tienen los estados de Phase.GRAPPLE; null en todos los demas.

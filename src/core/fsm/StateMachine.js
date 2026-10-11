@@ -649,13 +649,23 @@ export class StateMachine {
     }
 }
 
-/** Orden en el que se ofrecen las intenciones a la tabla. */
+/**
+ * Orden en el que se ofrecen las intenciones a la tabla.
+ *
+ * POR QUE `AL_SUELO` VA ANTES QUE `GUARDIA`
+ *   `setInput` recorre esta lista y se queda con la PRIMERA que encaje.
+ *   Tirarse al suelo se pide con la guardia puesta, asi que las dos
+ *   intenciones van en el mismo frame: si `GUARDIA` se.offerce antes, su regla
+ *   entra y el suelo no llega a mirarse nunca. El gesto al suelo es mas
+ *   especifico que "tengo la guardia puesta", asi que va delante.
+ */
 const INTENT_PRIORITY = [
     Intent.TECNICA,
     Intent.ATAQUE_ESPECIAL,
     Intent.ATAQUE_PESADO,
     Intent.ATAQUE_LIGERO,
     Intent.AGACHARSE,
+    Intent.AL_SUELO,
     Intent.GUARDIA,
     Intent.SALTAR,
     Intent.DASH,

@@ -314,6 +314,10 @@ export class FighterEntity {
     _guardCrouch(input) {
         if (!input.guard) return;
         if (!input.down) return;
+        // Solo en suelo firme. Si el peleador se ha tirado al suelo a proposito
+        // (`PECHO_TIERRA`), abajo ya no es "agachate": es estar tumbado, y
+        // forzarle la guardia baja lo devolvia de pie.
+        if (!this.fsm.inGroup(StateGroup.GROUNDED)) return;
         if (this.fsm.stateId === State.AGACHADO_GUARDIA_BAJA) return;
         this.fsm.changeState(State.AGACHADO_GUARDIA_BAJA, {
             source: TransitionSource.INPUT, reason: 'guardia + abajo'
@@ -357,6 +361,10 @@ export class FighterEntity {
 
         // 3. Combos de movimiento (cuadripedia / deslizamiento).
         this._combos(input, world);
+
+        // 3b. Movimientos de suelo: doble ABAJO + guardia -> pecho a tierra, y
+        // desde el suelo, ACCION -> gateo / deslizamiento / rodada.
+        this._groundMoves(input, extra, world);
 
         // 4. Estancias de boxeo (rotacion, baile, fijacion) + objetivo.
         this._stances(dt, input, world, extra);
@@ -427,7 +435,13 @@ export class FighterEntity {
     _systemIntents(extra) {
         // Levantada automatica: tras la invulnerabilidad de wakeup el
         // cuerpo se incorpora solo (el rival pasivo no se queda tirado).
+        //
+        // EXCEPCION: si el peleador se tiro al suelo a proposito
+        // (`voluntary`), no. Tirarse al suelo es una jugada: si se levantara
+        // solo a los 8 frames igual que tras un derribo, el estado no serviria
+        // para nada y el gesto seria un parpadeo.
         if (this.fsm.inGroup(StateGroup.DOWNED) &&
+            !this.fsm.state.voluntary &&
             this.fsm.frame >= CONFIG.WAKEUP_INVULN_FRAMES) {
             extra.pressed[Intent.LEVANTARSE] = true;
         }
@@ -608,8 +622,82 @@ export class FighterEntity {
         }
     }
 
+    /**
+     * Los movimientos de suelo.
+     *
+     *   doble ABAJO + guardia        -> pecho a tierra
+     *   desde el suelo + ACCION      -> gateo / deslizamiento / rodada
+     *   desde el suelo + ARRIBA      -> levantarse
+     *
+     * POR QUE LA DIRECCION ELIGE EL MOVIMIENTO DE SUELO
+     *   Gateo, deslizamiento y rodada son la misma idea (moverse tumbado) con
+     *   distinta direccion y distinto riesgo. Elegirlos con la cruceta es lo
+     *   coherente con el resto del juego: la direccion siempre ha elegido el
+     *   golpe, ahora elige tambien como te mueves por el suelo.
+     *
+     * @param input  el snapshot del frame
+     * @param extra  donde se anaden los intents
+     * @param world  para saber quien es el rival (el deslizamiento va a por el)
+     */
+    _groundMoves(input, extra, world) {
+        // --- TIRARSE AL SUELO --------------------------------------------
+        if (input.doubleDown && input.guard) {
+            if (this.fsm.state.control.canAct && this.fsm.inGroup(StateGroup.GROUNDED)) {
+                extra.pressed[Intent.AL_SUELO] = true;
+            }
+            return;
+        }
+
+        // --- YA ESTA EN EL SUELO -----------------------------------------
+        if (this.fsm.stateId !== State.PECHO_TIERRA) return;
+        if (!this.fsm.state.control.canAct) return;
+
+        // ACCION = moverse tumbado. La direccion elige cual.
+        //
+        // VA ANTES QUE LEVANTARSE A PROPOSITO: con el boton de accion
+        // pulsado, ARRIBA es "hacia el rival", o sea el deslizamiento. Para
+        // levantarse hay que pedirlo SIN accion, solo con arriba.
+        if (input.actionFresh) {
+            if (input.forward) {
+                this._deslizarHacia(world);
+            } else if (input.back) {
+                this._fsmChange(State.RODANDO, 'rodada (suelo, atras)');
+                this.loco.state = 'ROLL';
+            } else {
+                this._fsmChange(State.CUADRUPEDA, 'cuadrupedia (suelo)');
+                this.loco.state = 'QUAD';
+            }
+            this.loco.stateTime = 0;
+            return;
+        }
+
+        // ARRIBA = levantarse. Sin guardia tambien: estar tumbado y
+        // apretar arriba es "quiero levantarme" en cualquier juego de pelea, y
+        // pedir la guardia ademas para levantarse seria una barrera tonta.
+        if (input.dirEdge === 'UP') {
+            extra.pressed[Intent.LEVANTARSE] = true;
+        }
+    }
+
+    /** Deslizamiento: va hacia el rival, igual que el que ya habia. */
+    _deslizarHacia(world) {
+        this._fsmChange(State.DESLIZAMIENTO, 'deslizamiento (suelo)');
+        this.loco.state = 'SLIDE';
+        const o = world && world.opponentOf ? world.opponentOf(this) : null;
+        if (o) {
+            const dx = o.fighter.x - this.fighter.x;
+            const dz = o.fighter.z - this.fighter.z;
+            const d = Math.hypot(dx, dz) || 1;
+            this.loco.dir = { x: dx / d, z: dz / d };
+        }
+    }
+
+    _fsmChange(id, reason) {
+        this.fsm.changeState(id, { source: TransitionSource.INPUT, reason });
+    }
+
     // =========================================================================
-    // EL SISTEMA DE ESTANCIAS (arquetipo YUGO · core/boxing.js)
+    // El sistema de estancias (arquetipo YUGO · core/boxing.js)
     // -------------------------------------------------------------------------
     // El boton ACCION es el boton de las posturas. Solo decide el MANDO:
     // que postura hay, que silueta lleva la pose y que golpe sustituye

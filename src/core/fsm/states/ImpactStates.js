@@ -146,6 +146,47 @@ export default [
         onHeavyHit: State.SUELO_TUMBADO_BOCA_ABAJO
     },
     {
+        // PECHO A TIERRA VOLUNTARIO. Misma postura que el de arriba, pero el
+        // jugador la ha pedido (doble ABAJO + guardia) en vez de que le haya
+        // pasado: por eso `canAct` es true y NO se levanta solo.
+        //
+        // QUE ESTE EN EL GRUPO DOWNED NO ES UN DETALLE
+        //   Es lo que hace que tenga PRECIO. Mientras el peleador este aqui,
+        //   `_downAttack` del rival le castiga (`HitReactions.groundAttackPose`)
+        //   y los golpes bajos loosterean. Tirarse al suelo es una jugada con
+        //   coste: te quita la guardia y te deja a tiro. Si estuviera fuera del
+        //   grupo, seria una forma gratis de esquivar y decampar.
+        //
+        // POR QUE NO SE REUSA EL ESTADO DEL DERRIBO
+        //   El del derribo tiene `canAct: false` y `_systemIntents` lo levanta
+        //   solo a los 8 frames. Las dos cosas son correctas ahi y las dos son
+        //   justo lo contrario de lo que hace falta aqui: un estado que no
+        //   puede hacer nada y que se levanta solo no puede ser una plataforma
+        //   para gatear, deslizarse y rodar.
+        id: State.PECHO_TIERRA,
+        tag: 'SUELO',
+        phase: Phase.DOWNED,
+        groups: [StateGroup.DOWNED],
+        clip: 'down_prone',
+        // Marca de "esto lo ha pedido el jugador". La lee `_systemIntents` para
+        // no levantarlo solo, y el resto del motor para distinguir una caida
+        // volunteers de un knockdown.
+        voluntary: true,
+        physics: {
+            flags: F.DOWNED,
+            velocityPolicy: VelocityPolicy.ZERO,
+            hull: HULL_PRONE
+        },
+        control: { canAct: true, canTurn: false, buffersInput: true },
+        posture: { limbs: 'PRONE', hipY: 0.18, spinePitch: 0, headPitch: 0 },
+        down: {
+            wakeup: State.LEVANTANDOSE_DESDE_PECHO_TIERRA,
+            orientation: DownOrientation.CABEZA_A_RIVAL,
+            axis: FacingAxis.CABEZA_A_RIVAL
+        },
+        onHeavyHit: State.SUELO_TUMBADO_BOCA_ABAJO
+    },
+    {
         // Espalda (boca arriba). El knockdown clasico. El eje por defecto son
         // los pies hacia el rival, porque asi el primer frame de la levantada
         // mira hacia donde viene el golpe y el jugador ve el peligro.

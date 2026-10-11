@@ -236,6 +236,16 @@ const RULES = [
         debug: 'abajo -> agachado'
     }),
     rule({
+        from: FREE, source: TransitionSource.INPUT, event: Intent.AL_SUELO, priority: 58,
+        // Doble ABAJO + guardia. Va por debajo de la guardia baja (60) para
+        // que `guardia + abajo` siga siendo simplemente agacharse: tirarse al
+        // suelo es el gesto CON INTENCION, no mantener el pulgar abajo un rato
+        // mas.
+        guard: (ctx) => ctx.input.guard,
+        to: State.PECHO_TIERRA,
+        debug: 'doble abajo + guardia -> pecho a tierra'
+    }),
+    rule({
         from: FREE, source: TransitionSource.INPUT, event: Intent.DASH, priority: 48,
         guard: (ctx) => ctx.input.forward,
         to: State.SPRINT_FRONTAL,
