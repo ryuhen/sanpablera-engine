@@ -62,7 +62,18 @@ const esperados = {
     PoseBlender: 'funcion',
     blendFor: 'funcion',
     BLEND: 'objeto',
-    EASE: 'objeto'
+    EASE: 'objeto',
+    // suelo posicional
+    resolverSuelo: 'funcion',
+    castigoDe: 'funcion',
+    resolverGiro: 'funcion',
+    sumisionDe: 'funcion',
+    GroundFight: 'funcion',
+    GroundSystem: 'funcion',
+    SUELO_POS: 'objeto',
+    SUELO_BOTON: 'objeto',
+    CASTIGO: 'objeto',
+    ACERCAMIENTO: 'objeto'
 };
 for (const [k, tipo] of Object.entries(esperados)) {
     const v = facade[k];

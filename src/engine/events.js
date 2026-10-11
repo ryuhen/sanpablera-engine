@@ -56,6 +56,12 @@ export const EV = Object.freeze({
     // --- suelo ---
     GROUND_ENTER: 'GROUND_ENTER',          // entra en suelo
     GROUND_EXIT: 'GROUND_EXIT',            // sale del suelo
+    // --- suelo posicional (core/ground/position.js) ---
+    POSITION_UP: 'POSITION_UP',            // el de arriba gana un escalon
+    POSITION_DOWN: 'POSITION_DOWN',        // el de arriba concede terreno
+    POSITION_LOST: 'POSITION_LOST',        // el de abajo ha perdido su sitio
+    REVERSAL: 'REVERSAL',                  // inversion: cambia quien esta arriba
+    ESCAPE_BLOCKED: 'ESCAPE_BLOCKED',      // se intento salir y la ventana estaba cerrada
     DOWNED_GETUP: 'DOWNED_GETUP',          // se ha levantado
 
     // --- agarre ---

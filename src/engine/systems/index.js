@@ -157,6 +157,18 @@ export const otherRole = SPF.otherRole;
 // lateral, control de espalda, tortuga) como posiciones con transiciones.
 // ---------------------------------------------------------------------------
 export { default as GroundStates } from '../../core/fsm/states/GroundStates.js';
+export {
+    POS as SUELO_POS, GEV as SUELO_EVENTO, ROL as SUELO_ROL, MOTIVO as SUELO_MOTIVO,
+    resolverSuelo, peligroDe, presionDe, ventanaDe, rangoDe, info as sueloInfo,
+    esPeor, porPeligro, porRango, otroRol as otroRolSuelo, hayArriba,
+    estaEnPeligro, mejorAcercamiento, puedeCastigar, sumisionesDe,
+    ZONA as SUELO_ZONA, ACERCAMIENTO
+} from '../../core/ground/position.js';
+export {
+    BOTON as SUELO_BOTON, ACCION as SUELO_ACCION, CASTIGO, SUM as SUELO_SUM,
+    castigoDe, resolverGiro, sumisionDe, proyeccionDe, posicionesDeRemate
+} from '../../core/ground/punish.js';
+export { GroundFight, GroundSystem } from '../../core/ground/GroundGame.js';
 export { default as ImpactStates } from '../../core/fsm/states/ImpactStates.js';
 
 // ---------------------------------------------------------------------------
@@ -203,7 +215,7 @@ export const SYSTEM_STATUS = Object.freeze({
     CLASH: { done: true, note: 'ataque x defensa, explotacion RPS, guardia y evasion por aire/pisoton' },
     GUARD_IK: { done: false, note: 'el IK coloca la guardia; falta la DEFLEXION que busca la extremidad' },
     GRAPPLE: { done: true, note: '30 estados uke/tori; faltan las variantes por disciplina y la cinematica' },
-    GROUND: { done: false, note: 'los estados de suelo existen; falta el modelo POSICIONAL (monteja, lateral, espalda)' },
+    GROUND: { done: false, note: 'modelo posicional (12 posiciones, ventana de escape, giro por costillas) y castigo por zonas HECHOS y probados; falta un estado de la FSM por posicion y conectarlos a los botones' },
     AIR: { done: true, note: 'seis saltos, tres familias de ataque aereo y el antiaereo desde el suelo' },
     LOCOMOTION: { done: true, note: 'paso por toque frente a caminata, paso largo, dash y ataques corriendo' },
     CLOTH: { done: true, note: 'tela por cadenas de verlet cosida a los hombros' }
@@ -211,8 +223,8 @@ export const SYSTEM_STATUS = Object.freeze({
 
 /** Los sistemas a medio hacer, por orden de lo que bloquea mas. */
 export const PENDING = Object.freeze([
+    'GROUND: un estado de la FSM por posicion y conectarlos a los botones',
     'CANCEL: encadenar golpe dentro de la recuperacion de otro',
-    'GROUND: modelo posicional (monteja, control lateral, espalda, tortuga)',
     'GUARD_IK: deflection (el brazo busca la extremidad del atacante)',
     'APPAREL: colgar la malla de las prendas de los huesos en runtime',
     'GRAPPLE: variantes por disciplina (judo, sambo, sumo, greco)'
