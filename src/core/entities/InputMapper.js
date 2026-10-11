@@ -21,6 +21,12 @@
  * ============================================================================
  */
 import SPF from '../fsm/Constants.js';
+// La cuantizacion de la cruceta vive en la matriz de direcciones y NO aqui.
+// Tener el umbral en los dos sitios es como se acaba cuantizando dos veces
+// con reglas distintas: `forward`/`back` usan uno y `dir8` usaria otro, y
+// entonces "adelante" y "adelante-derecha" podrian no cuadrar en el mismo
+// frame. Una sola constante, una sola verdad.
+import { quantizeDirection, AXIS_EPS } from '../directionMatrix.js';
 
 const { Intent } = SPF;
 
@@ -35,8 +41,9 @@ export const AIR_SEQ_WINDOW = 0.34;
  *  los combos de movimiento (cuadripedia / deslizamiento). */
 export const COMBO_WINDOW = 0.30;
 
-/** Umbral de proyeccion para considerar un movimiento "hacia el rival". */
-const AXIS_EPS = 0.35;
+/** Umbral de proyeccion para considerar que un eje esta pulsado.
+ *  Viene de `core/directionMatrix.js`: es el mismo numero que usa
+ *  `quantizeDirection`, y TIENE que serlo (ver la nota del import). */
 
 /** D-pad -> plano de mundo usando la basis de la camara
  *  (f = hacia donde mira, r = derecha de pantalla). */
@@ -141,7 +148,15 @@ export class InputMapper {
             actionHeld: !!b.action,
             actionFresh: false,
             crouch: !!(d.down || d.downLeft || d.downRight),
-            dirEdge: null
+            dirEdge: null,
+            // Las ocho direcciones de la cruceta, medidas en la base
+            // (side, fwd) que ya se ha calculado arriba: `side` positivo es la
+            // derecha del peleador y `fwd` positivo mira al rival. Es lo que
+            // consume la matriz de golpes (`core/directionMatrix.js`).
+            //
+            // Se emite SIEMPRE, tambien con el stick suelto: entonces
+            // sale 'N' y la matriz responde con el golpe base del boton.
+            dir8: quantizeDirection(side, fwd)
         };
 
         // ---- arista de direccion + doble toque (dash) ----

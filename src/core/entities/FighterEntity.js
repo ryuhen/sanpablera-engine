@@ -33,6 +33,50 @@ import { getMoves } from '../fsm/MoveTable.js';
 import { createProfile, defineState } from '../fsm/StateCatalog.js';
 import { registerCharacterStances } from '../fsm/states/CharacterStates.js';
 import * as Boxer from '../boxing.js';
+import { resolveAttack } from '../directionMatrix.js';
+
+/**
+ * Que bota de la matriz sale de que ESTADO DE ATAQUE entro el peleador.
+ *
+ * POR QUE SE MIRA EL ESTADO Y NO EL BOTON QUE SE PULSA
+ *   `ATAQUE_AEREO` sirve para los dos botones: no dice cual se ha pulsado.
+ *   Para ese caso, y para cuando llega un encadenado sin boton fresco, se
+ *   mira el boton que se acaba de pulsar. Para el resto gana el estado, que
+ *   es el que sabe que se pidio.
+ *
+ * @param {string} stateKey  `state.attack` del estado actual
+ * @param {object} input     el ultimo snapshot (`_lastInput`)
+ * @returns {'PUNCH'|'KICK'}
+ */
+export function attackButtonOf(stateKey, input) {
+    if (stateKey === 'ATAQUE_PESADO' || stateKey === 'ATAQUE_BARRIDO') return 'KICK';
+    if (stateKey === 'ATAQUE_LIGERO' || stateKey === 'ATAQUE_AGACHADO') return 'PUNCH';
+    const pressed = (input && input.pressed) || {};
+    return pressed[SPF.Intent.ATAQUE_PESADO] ? 'KICK' : 'PUNCH';
+}
+
+/**
+ * En que fila de la matriz esta el golpe: de pie, agachado o en el aire.
+ *
+ * POR QUE EL AIRE MANDA SOBRE TODO LO DEMAS
+ *   En el aire no hay suelo: da igual que el stick marque abajo, que el
+ *   golpe sale por arriba. Por eso se pregunta al grupo de estados y no al
+ *   input.
+ *
+ * POR QUE PARA AGACHARSE SE MIRA EL INPUT Y NO EL ESTADO
+ *   Al entrar en el ataque ya se ha salido del estado `AGACHADO`, asi que el
+ *   estado ya no lo dice. El `down` del input es lo que queda, y es lo mismo
+ *   que usaba la regla de transicion que metia al peleador en agachado.
+ *
+ * @param {object} fsm
+ * @param {object} input
+ * @returns {'STAND'|'CROUCH'|'AIR'}
+ */
+export function attackStanceOf(fsm, input) {
+    if (fsm.inGroup(SPF.StateGroup.AIRBORNE)) return 'AIR';
+    if (input && input.down) return 'CROUCH';
+    return 'STAND';
+}
 import * as FighterRig from './FighterRig.js';
 import { BLEND, blendFor } from '../anim/Blend.js';
 
@@ -212,6 +256,15 @@ export class FighterEntity {
             dodgeLowUntil: -1,          // esquiva BAJOS/SUELO (dash saltando)
             dashUsed: false             // un dash por pulsacion de eje
         };
+
+        /**
+         * El golpe que esta corriendo, fijado al frame en que empezo.
+         * Ver `stanceAttackKey`: sin esto, soltar la cruceta a mitad de
+         * animacion cambiaria el golpe por la mitad.
+         */
+        this._attackDir = null;
+        this._attackStance = null;
+        this._attackButton = null;
     }
 
     // =========================================================================
@@ -261,12 +314,36 @@ export class FighterEntity {
                 pressed: Object.assign(Object.create(null), input.pressed, extra.pressed)
             })
             : input;
+        // EL ESTADO ANTERIOR SE GUARDA **ANTES** DE `setInput`, y no despues.
+        //
+        // `setInput` es quien aplica las transiciones por input: recorre los
+        // intents y, si alguno encaja, llama a `_enterVia` y cambia el estado
+        // EN EL MOMENTO. Si se guardara el `prevId` despues (que es lo que
+        // hacia antes), aqui ya se veria el estado NUEVO y la comparacion
+        // `stateId !== prevId` saldria siempre falsa para todo lo que se
+        // dispara con un boton.
+        //
+        // Que se perdia, y era silencioso:
+        //   - `_justAttacked`, que encara al rival al atacar;
+        //   - el COSTE DE RECURSO del golpe (la unica llamada a
+        //     `gauge.spend(meterCost)` de todo el motor), o sea que el
+        //     especial, que cuesta 25, salia GRATIS;
+        //   - el Aviso de articulacion al entrar en un estado de agarre;
+        //   - y la fijacion de la direccion del golpe (este trabajo).
+        const prevId = this.fsm.stateId;
         this.fsm.setInput(finalInput);
+        if (this.fsm.stateId !== prevId) this._onStateEnter(prevId);
 
         // 6. Avanzar la maquina.
-        const prevId = this.fsm.stateId;
+        //
+        // OJO: aqui se vuelve a leer el estado de partida. Si se comparase
+        // contra el MISMO `prevId` de antes, esta comprobacion dispararia
+        // tambien cuando el cambio lo hizo `setInput` (que ya lo comprobo
+        // justo encima) y `_onStateEnter` pasaria dos veces: el especial se
+        // cobraria 50 en vez de 25, y el `_justAttacked` saltaria dos veces.
+        const prevId2 = this.fsm.stateId;
         this.fsm.update(dt);
-        if (this.fsm.stateId !== prevId) this._onStateEnter(prevId);
+        if (this.fsm.stateId !== prevId2) this._onStateEnter(prevId2);
 
         // 7. Hitbox activa: el mundo decide si conecta (y contra quien).
         if (this.fsm.isHitboxActive()) world.tryHit(this);
@@ -484,14 +561,68 @@ export class FighterEntity {
      * La postura manda en el golpe: si la postura activa declara un
      * golpe propio para ese boton, ese es el que sale. Si el peleador
      * no lo tiene en su moveset, gana el golpe del estado.
+     *
+     * LA JERARQUIA (tres capas, de la mas comprometida a la menos)
+     *   1. La matriz de direcciones (`core/directionMatrix.js`), pero SOLO
+     *      cuando la cruceta esta en una direccion de verdad.
+     *   2. La postura de boxeo. Pedro es boxeador y su postura por defecto es
+     *      SHELL, que esta SIEMPRE activa: sin esta excepcion suplantaria a
+     *      todos los golpes y la matriz no se ejecutaria nunca. Con el sticks
+     *      suelto manda la postura (el moveset de Pedro es el que se ve) y con
+     *      una direccion manda la matriz.
+     *   3. El golpe del estado (`ATAQUE_LIGERO`...). Es el suelo: nunca
+     *      falla, asi que la cadena siempre acaba en un golpe real.
+     *
+     * POR QUE LA CRUCETA GANA CUANDO LA HAY, Y NO SIEMPRE
+     *   Pulsar un boton sin tocar la cruceta es lo que hace el 90 % de las
+     *   veces, y ese golpe debe ser el del personaje. Tocar una direccion es
+     *   una decision consciente de un frame: si el jugador la ha tomado, es
+     *   la que manda. Al reves (direccion por delante de todo) las posturas se
+     *   quedarian sin usar en cuanto se moviera un dedo la cruceta.
+     *
      * @param {string} stateKey  clave de ataque del estado (ATAQUE_LIGERO...)
      */
     stanceAttackKey(stateKey) {
+        // 1 · la matriz de direcciones, si la cruceta dice algo
+        const dir = this._attackDir;
+        if (dir && dir !== 'N') {
+            const matKey = resolveAttack(this._attackStance, dir, this._attackButton);
+            if (matKey && matKey !== stateKey && getMoves(this.characterId)[matKey]) {
+                return matKey;
+            }
+        }
+        // 2 · la postura de boxeo
         const S = this.stance;
-        if (!S || !S.id) return null;
-        const key = Boxer.stanceMove(S.id, stateKey);
-        if (!key || key === stateKey) return null;
-        return getMoves(this.characterId)[key] ? key : null;
+        if (S && S.id) {
+            const key = Boxer.stanceMove(S.id, stateKey);
+            if (key && key !== stateKey && getMoves(this.characterId)[key]) return key;
+        }
+        // 3 · el golpe del estado
+        return null;
+    }
+
+    /**
+     * Fija la direccion, la postura y el boton del golpe que se esta
+     * empezando.
+     *
+     * POR QUE HAY QUE FIJARLO Y NO LEERLO CADA FRAME
+     *   El getter `move` de la FSM se consulta en cada frame del ataque, no
+     *   solo al empezar. Si la direccion se leyera del input vivo, bastaria
+     *   con que el jugador suelte la cruceta a mitad del jab para que el
+     *   golpe CAMBIASE: pasaria de PUNO_ADELANTE_IZQ a ATAQUE_AGACHADO a
+     *   mitad de animacion, con la hitbox cambiada y el dano otro. El combate
+     *   daria un golpe que no existe en ningun lado y no habria ningun error.
+     *
+     *   Con la fijacion, el golpe es el que se eligio en el frame del
+     *   contacto y no se vuelve a mirar hasta que empiece el siguiente.
+     */
+    _latchAttack(stateKey) {
+        const input = this._lastInput || {};
+        // El boton se lee del estado, no del input: durante un encadenado el
+        // boton puede llevar tiempo sin pulsarse y aun asi toca su turno.
+        this._attackButton = attackButtonOf(stateKey, input);
+        this._attackStance = attackStanceOf(this.fsm, input);
+        this._attackDir = input.dir8 || 'N';
     }
 
     /** Adopta una postura de golpe (sin transicion). */
@@ -947,6 +1078,11 @@ export class FighterEntity {
     }
 
     _onStateEnter(prevId) {
+        // ANTES de leer `move`. El golpe se fija aqui y `move` ya lo devuelve
+        // con la direccion puesta, asi que el coste que se paga es el del
+        // golpe que va a salir de verdad. Al reves, se pagaria el del estado
+        // y el especial podria costar una barra que no se gasta.
+        if (this.fsm.inGroup(StateGroup.ATTACKING)) this._latchAttack(this.fsm.state.attack);
         // Coste de recurso del golpe al que se entra.
         const move = this.fsm.move;
         if (move && move.meterCost) this.fighter.gauge.spend(move.meterCost);

@@ -51,8 +51,22 @@ const MT = await load('src/core/fsm/MoveTable.js');
 // existen. Que es justo lo que estas pruebas tienen que comprobar.
 await load('src/core/fsm/states/Movesets.js');
 const AP = await load('src/core/entities/AttackPoses.js');
+const RigMod = await load('src/core/cine/Rig.js');
+const SPF = (await load('src/core/fsm/Constants.js')).default;
+const { BONES } = await load('src/core/cine/CineConstants.js');
 
 const { resolveAttack, quantizeDirection, allCombinations, ATTACK_MATRIX, DIRECTIONS, STANCES, BUTTONS } = DM;
+
+/** El rig del contrato, sin depender de ningun .glb (igual que en las otras suites). */
+function contractRig() {
+    const bones = BONES.map((b) => ({
+        name: b.name, parentName: b.parent,
+        localT: b.offset.slice(), localQ: [0, 0, 0, 1]
+    }));
+    const map = Object.create(null);
+    for (const b of BONES) map[b.name] = b.name;
+    return RigMod.buildRig({ map, missing: [], duplicates: [] }, bones, { scale: 1, rootFix: 'Y_UP' });
+}
 
 // ===========================================================================
 section('1 · La cuantizacion de direcciones');
@@ -293,6 +307,281 @@ run('la matriz es la UNICA fuente: nadie la duplica a mano', () => {
 });
 
 // ===========================================================================
+// ===========================================================================
+section('5 · El cableado de verdad (no solo la tabla)');
+// ===========================================================================
+
+const IM = await load('src/core/entities/InputMapper.js');
+const FE = await load('src/core/entities/FighterEntity.js');
+
+// Camara mirando a +Z, con la derecha de pantalla en +X. El rival esta en +Z,
+// o sea DEFRENTE: lo que el jugador ve a la derecha es la izquierda del
+// peleador. Es la razon de que pulsar "derecha" de la cruceta sea 'L' y no
+// 'R', y por eso el test lo fija explicitamente en vez de suponerlo.
+const CAM = { fx: 0, fz: 1, rx: 1, rz: 0 };
+const RIVAL = { x: 0, z: 1 };
+
+function touch(dpad = {}, buttons = {}) {
+    return {
+        dpad: Object.assign({
+            up: false, down: false, left: false, right: false,
+            upLeft: false, upRight: false, downLeft: false, downRight: false
+        }, dpad),
+        buttons: Object.assign({
+            attack1: false, attack2: false, block: false, action: false
+        }, buttons)
+    };
+}
+
+/** El snapshot real del mapper, no uno escrito a mano: se prueba toda la cadena. */
+function pulsar(dpad, buttons, frames = 1) {
+    const m = new IM.InputMapper();
+    const t = touch(dpad, buttons);
+    let snap = null;
+    for (let i = 0; i < frames; i++) {
+        m.tick(1 / 60);
+        snap = m.snapshot(t, CAM, RIVAL);
+    }
+    return snap;
+}
+
+run('el mapper dice en que de las ocho direcciones mira la cruceta', () => {
+    ok(pulsar({}).dir8 === 'N', 'sticksuelto -> N', pulsar({}).dir8);
+    ok(pulsar({ up: true }).dir8 === 'F', 'arriba -> adelante', pulsar({ up: true }).dir8);
+    ok(pulsar({ down: true }).dir8 === 'B', 'abajo -> atras', pulsar({ down: true }).dir8);
+    // El rival esta DEFRENTE, asi que la derecha de pantalla es su izquierda.
+    ok(pulsar({ right: true }).dir8 === 'L', 'derecha de pantalla -> izquierda del peleador');
+    ok(pulsar({ left: true }).dir8 === 'R', 'izquierda de pantalla -> derecha del peleador');
+    ok(pulsar({ up: true, right: true }).dir8 === 'FL', 'arriba+derecha -> diagonal');
+    ok(pulsar({ up: true, left: true }).dir8 === 'FR', 'arriba+izquierda -> la otra diagonal');
+    ok(pulsar({ down: true, left: true }).dir8 === 'BR', 'abajo+izquierda -> atras y derecha');
+});
+
+run('el mapper da la MISMA direccion que la matriz, no una cuenta aparte', () => {
+    // Si el mapper y la tabla calcularan el sector por su cuenta, un dia
+    // cambiarian las reglas de uno y el otro diria otra cosa: el golpe seria
+    // de una direccion y el jugador habria pulsado otra.
+    for (const d of [{}, { up: true }, { down: true }, { left: true }, { right: true },
+    { up: true, left: true }, { up: true, right: true },
+    { down: true, left: true }, { down: true, right: true }]) {
+        const snap = pulsar(d);
+        const lado = snap.x;    // `side`
+        const frente = snap.y; // `fwd`
+        ok(snap.dir8 === quantizeDirection(lado, frente),
+            `dir8 coincide con la tabla (${JSON.stringify(d)})`, snap.dir8);
+    }
+});
+
+// --- el circuito completo: entidad + FSM + matriz -------------------------
+
+const rig = contractRig();
+const model = { rig, applyPose() { }, place() { } };
+// El gauge de mentira necesita la misma forma que el de verdad: `update` lo
+// llama la entidad cada frame para el recurso, `canRun` para correr. Sin ellos
+// el fallo sale a mitad del `update` y esconde lo que se quiere comprobar.
+const gauge = () => ({
+    value: 100,
+    spend(v) { this.value -= v; },
+    gain(v) { this.value += v; },
+    update() { }, canRun: () => true, reset() { this.value = 100; }
+});
+
+function mkFighter(id) {
+    return new FE.FighterEntity({
+        fighter: { name: id, x: id === 'P1' ? -0.45 : 0.45, z: 0, facing: 0, health: 100, gauge: gauge() },
+        model, characterId: 'PEDRO', id, stance: 'SHELL'
+    });
+}
+
+function mkWorld(a, b) {
+    return {
+        hitstop: 0, minSpacing: 0.9,
+        opponentOf: (e) => (e === a ? b : a),
+        tryHit: () => 'miss', props: [], ringLimit: 2.8, ringOut: () => null
+    };
+}
+
+/**
+ * Pulsa un boton con una direccion y devuelve la clave del golpe que salio.
+ * @returns {{key:string|null, frames:number}}
+ */
+function golpe(dpad, button, pasos = 1) {
+    const e1 = mkFighter('P1');
+    const e2 = mkFighter('P2');
+    const world = mkWorld(e1, e2);
+    let key = null;
+    for (let i = 0; i < pasos; i++) {
+        const boton = i === 0 ? button : {};   // solo el primer frame es arista
+        const snap = pulsar(dpad, boton);
+        e1.update(1 / 60, snap, world);
+        if (i === 0) key = e1.fsm.move ? e1.fsm.move.key : null;
+    }
+    return { key, entidad: e1, world };
+}
+
+run('pulsar una direccion + un boton da un golpe DISTINTO por direccion', () => {
+    // Con el stick suelto el golpe NO es ATAQUE_LIGERO: Pedro tiene la
+    // postura SHELL siempre activa y su golpe para ese boton es GOLPE_CORTO.
+    // Eso es lo que hay antes de este trabajo y lo que hay ahora, y es
+    // justamente lo que la direccion tiene que distinguir.
+    const base = golpe({}, { attack1: true }).key;
+    ok(base === 'GOLPE_CORTO', 'sticksuelto: el golpe del personaje', base);
+
+    const conDir = {
+        atras: golpe({ down: true }, { attack1: true }).key,
+        lateral: golpe({ left: true }, { attack1: true }).key,
+        diag: golpe({ up: true, left: true }, { attack1: true }).key
+    };
+    for (const [nombre, key] of Object.entries(conDir)) {
+        ok(!!key, `${nombre}: sale un golpe`, key);
+        ok(key !== base, `${nombre}: es DISTINTO del de sticksuelto`, [base, key]);
+    }
+    // Y que sean distintos entre si, no tres nombres para el mismo golpe.
+    const vals = Object.values(conDir);
+    ok(new Set(vals).size === vals.length, 'las tres direcciones tambien se distinguen entre si', vals.join(' | '));
+});
+
+run('la patada sale de la otra celda que el puño', () => {
+    const p = golpe({ left: true }, { attack1: true }).key;
+    const k = golpe({ left: true }, { attack2: true }).key;
+    ok(!!k && !!p, 'los dos dan golpe', [p, k]);
+    ok(p !== k, 'puño y patada en la misma direccion son distintos', [p, k]);
+    ok(/PATADA|PESADO|FRONTAL/.test(k), 'y el segundo es de pierna', k);
+});
+
+run('EL GOLPE QUEDA FIJADO: soltar la cruceta no lo cambia a mitad', () => {
+    // Es el fallo que hizo falta fijar. El getter `move` se lee en cada frame
+    // del ataque: si la direccion se leyera del input vivo, con el stick
+    // suelto a mitad de un jab el golpe pasaria de PUNO_LATERAL a ATAQUE_LIGERO
+    // sin que cambiara el estado ni sonara ningun error. La hitbox y el dano
+    // cambiarian por debajo de la animacion.
+    const e1 = mkFighter('P1');
+    const e2 = mkFighter('P2');
+    const world = mkWorld(e1, e2);
+
+    e1.update(1 / 60, pulsar({ left: true }, { attack1: true }), world);
+    const alEmpezar = e1.fsm.move ? e1.fsm.move.key : null;
+    ok(alEmpezar && alEmpezar !== 'GOLPE_CORTO', 'empieza con el golpe lateral', alEmpezar);
+
+    // El ataque dura poco (amago + activo), asi que el bucle tiene que ser
+    // corto: si se pasa de largo, `fsm.move` sale null porque el golpe ha
+    // terminado, y el test pasaria por el motivo equivocado. Se comprueba
+    // que sigue EN ataque, para que un fallo aqui no se disfraze de eso.
+    const sigueAtacando = (i) => ok(e1.fsm.inGroup(SPF.StateGroup.ATTACKING),
+        `frame ${i}: sigue en el ataque (el bucle no se ha pasado de largo)`);
+
+    // Ahora el jugador SUELTA la cruceta. El golpe tiene que seguir siendo el.
+    for (let i = 0; i < 4; i++) {
+        e1.update(1 / 60, pulsar({}), world);
+        sigueAtacando(i);
+        const ahora = e1.fsm.move ? e1.fsm.move.key : null;
+        ok(ahora === alEmpezar,
+            `frame ${i}: el golpe no se ha cambiado`, [alEmpezar, ahora]);
+    }
+
+    // Y con la OTRA direccion tampoco: ese es el caso que duele. Se usa una
+    // horizontal y no una diagonal con ARRIBA porque arriba es el boton de
+    // saltar: cambiar ahi saca al peleador del ataque, que es correcto pero
+    // no es lo que este test quiere medir.
+    for (let i = 0; i < 3; i++) {
+        e1.update(1 / 60, pulsar({ right: true }), world);
+        sigueAtacando(i);
+        const ahora = e1.fsm.move ? e1.fsm.move.key : null;
+        ok(ahora === alEmpezar,
+            `frame ${i}: cambiar de direccion tampoco lo cambia`, [alEmpezar, ahora]);
+    }
+});
+
+run('agachado usa los golpes bajos de la fila CROUCH', () => {
+    const dePie = golpe({}, { attack1: true }).key;
+    const abajo = golpe({ down: true }, { attack1: true }).key;
+    ok(!!abajo, 'agachado y pulsando: sale golpe', abajo);
+    ok(abajo !== dePie, 'y no es el de pie', [dePie, abajo]);
+    ok(abajo === resolveAttack('CROUCH', 'B', 'PUNCH'),
+        'y es exactamente el de la fila agachada', abajo);
+});
+
+run('la postura de boxeo se respeta cuando la cruceta esta suelta', () => {
+    // Pedro tiene SHELL por defecto y esa postura esta SIEMPRE activa. Con el
+    // stick suelto, el golpe tiene que ser el suyo y no el de la matriz: si no,
+    // el moveset del personaje desapareceria en cuanto se tocara la cruceta.
+    const e1 = mkFighter('P1');
+    const e2 = mkFighter('P2');
+    const world = mkWorld(e1, e2);
+
+    const deLaPostura = golpe({}, { attack1: true }).key;
+    ok(!!deLaPostura, 'sticksuelto + puño sale un golpe', deLaPostura);
+
+    // Y con direccion, la cruceta manda sobre la postura.
+    const conDireccion = golpe({ left: true }, { attack1: true }).key;
+    ok(conDireccion !== deLaPostura,
+        'pero con direccion manda la matriz', [deLaPostura, conDireccion]);
+    ok(conDireccion === resolveAttack('STAND', 'R', 'PUNCH'),
+        'y es exactamente la celda de la matriz', conDireccion);
+
+    // La postura sigue estando viva: no la hemos declarado muerta.
+    e1.update(1 / 60, pulsar({}), world);
+    ok(!!(e1.stance && e1.stance.id), 'la postura sigue activa', e1.stance && e1.stance.id);
+});
+
+// ===========================================================================
+section('6 · Un bug de paso: el especial no costaba nada');
+// ===========================================================================
+
+run('entrar en un estado por INPUT dispara su _onStateEnter', () => {
+    // ESTE TEST VIVE AQUI aunque no hable de direcciones, y por eso lo digo
+    // explicitamente: se ha encontrado cableando la matriz y usa el mismo
+    // arnes, asi que separarlo en otro fichero solo costaria duplicarlo.
+    //
+    // EL FALLO: en `update`, el estado anterior se guardaba DESPUES de
+    // `fsm.setInput()`. Pero `setInput` es quien aplica las transiciones por
+    // input, asi que al llegar a la comprobacion el estado ya era el NUEVO y
+    // `stateId !== prevId` salia siempre falsa. `_onStateEnter` no se llamaba
+    // NUNCA para nada que se dispare con un boton.
+    //
+    // LO QUE SE PERDIA, en silencio:
+    //   - el COSTE DE RECURSO. La unica llamada a `gauge.spend(meterCost)` de
+    //     todo el motor esta en `_onStateEnter`, asi que el ESPECIAL (25 de
+    //     barra) salia gratis y de hecho infinitamente seguido;
+    //   - `_justAttacked`, que encara al rival al golpear.
+    const e1 = mkFighter('P1');
+    const e2 = mkFighter('P2');
+    const world = mkWorld(e1, e2);
+    e1.fighter.gauge.value = 100;
+
+    const base = pulsar({}, {});
+    e1.update(1 / 60, base, world);
+    const antes = e1.fighter.gauge.value;
+    ok(antes === 100, 'la barra empieza llena', antes);
+
+    // Se fuerza el especial por input, sin pasar por el doble toque (que
+    // necesitaria reloj y dos snapshots).
+    const conEspecial = pulsar({}, {});
+    conEspecial.pressed[SPF.Intent.ATAQUE_ESPECIAL] = true;
+    e1.update(1 / 60, conEspecial, world);
+
+    ok(e1.fsm.stateId === SPF.State.ATAQUE_ESPECIAL,
+        'el especial se ha ejecutado', e1.fsm.stateId);
+    ok(e1.fighter.gauge.value < antes,
+        'y ha COSTADO barra (antes era gratis)', [antes, e1.fighter.gauge.value]);
+    ok(antes - e1.fighter.gauge.value === 25,
+        'exactamente el coste declarado (25)', antes - e1.fighter.gauge.value);
+});
+
+run('un golpe normal no cuesta barra', () => {
+    // La comprobacion de al lado: si el arreglo cobrara de mas, seria tan
+    // grave como cobrar de menos. El jab no tiene `meterCost`.
+    const e1 = mkFighter('P1');
+    const e2 = mkFighter('P2');
+    const world = mkWorld(e1, e2);
+    e1.fighter.gauge.value = 100;
+    e1.update(1 / 60, pulsar({}, {}), world);
+    const antes = e1.fighter.gauge.value;
+    e1.update(1 / 60, pulsar({}, { attack1: true }), world);
+    ok(e1.fighter.gauge.value >= antes,
+        'el jab no cuesta nada (gana, si acaso)', [antes, e1.fighter.gauge.value]);
+});
+
 console.log('\n================================================================');
 if (fails.length) {
     console.log(`FALLOS (${fails.length}):`);
