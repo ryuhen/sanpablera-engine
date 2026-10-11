@@ -431,6 +431,13 @@ const world = {
             if (typeof ent.vx === 'number') ent.vx = 0;
             if (typeof ent.vz === 'number') ent.vz = 0;
         }
+        // Las dos mitades del mundo han cambiado de golpe (de las cuerdas al
+        // centro), asi que el cuerpo no se mezcla entre una y otra: se corta.
+        // Sin esto, al reaparecer el peleador hace un barrido desde las
+        // cuerdas que no parece un efecto, parece un fallo de render.
+        for (const ent of entities) {
+            if (typeof ent.cutBlend === 'function') ent.cutBlend();
+        }
         inputMapper.reset();
         return fuera.name;
     },

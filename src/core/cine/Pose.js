@@ -176,6 +176,13 @@ const clampW = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
  * movil como tirones a la hora de un golpe.
  */
 export function blendPoseInto(dst, a, b, t) {
+    // Se VACIA antes de escribir. `dst` se reutiliza frame a frame (ver
+    // PoseBlender), y escribir encima sin borrar deja vivos los huesos que
+    // estaban en la mezcla anterior y que esta ya no toca: un pie que se
+    // despega de la pose aerea se quedaria clavado en el aire durante toda la
+    // mezcla. Los tres casos escriben la MISMA forma, la union de a y b.
+    resetPose(dst);
+
     if (t <= 0) { for (const k in a.rot) dst.rot[k] = qclone(a.rot[k]); for (const k in a.pos) dst.pos[k] = a.pos[k].slice(); return dst; }
     if (t >= 1) { for (const k in b.rot) dst.rot[k] = qclone(b.rot[k]); for (const k in b.pos) dst.pos[k] = b.pos[k].slice(); return dst; }
     for (const bone of touched(a, b)) {

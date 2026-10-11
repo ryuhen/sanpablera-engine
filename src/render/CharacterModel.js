@@ -54,6 +54,7 @@ import { buildBoneMap } from './BoneMap.js';
 import { buildRig, fk } from '../core/cine/Rig.js';
 import { createPose, rotOf, posOf } from '../core/cine/Pose.js';
 import { CFG } from '../core/cine/CineConstants.js';
+import { PoseBlender, BLEND } from '../core/anim/Blend.js';
 import { buildParts, tintParts } from './PartMannequin.js';
 
 /** Quita el sufijo del pivot de un nombre de glTF (`Bone.001` -> `Bone`). */
@@ -399,6 +400,10 @@ export class CharacterModel {
         }
 
         // --- 7. Estado numerico inicial --------------------------------------
+        // El mezclador vive aqui, uno por personaje. Se crea antes de la
+        // primera pose para que la primera applyPose ya pueda mezclar.
+        this.blender = new PoseBlender();
+
         this.fkState = fk(this.rig, this.pose);
         this.applyPose(this.pose, this.fkState);
     }
@@ -417,11 +422,46 @@ export class CharacterModel {
      *
      * @param {object} [pose]        Pose de deltas (Pose.js)
      * @param {object} [fkState]      resultado de fk(), si ya esta calculado
+     * @param {object} [opts]
+     * @param {string} [opts.clip]   de donde viene la pose. Si NO se pasa, no
+     *   hay mezcla: es lo que necesitan los que llaman aqui con poses sueltas
+     *   (el inspector) y no un personaje en movimiento.
+     * @param {number} [opts.dur]    segundos de mezcla al cambiar de clip
+     * @param {number} [opts.dt]     segundos que ha durado este frame
      * @returns {object} el fkState usado
      */
-    applyPose(pose, fkState) {
-        const p = pose || this.pose;
-        const st = fkState || fk(this.rig, p);
+    applyPose(pose, fkState, opts) {
+        let p = pose || this.pose;
+        let st = fkState;
+
+        // --- EL BLENDING, ANTES DEL FK --------------------------------------
+        //
+        // El orden aqui NO es casual y es lo unico delicado de todo el
+        // metodo. La mezcla va ANTES de calcular el fk porque el fk es una suma
+        // de longitudes de hueso: mezclar dos resultados finales daria un
+        // esqueleto estirado a mitad de mezcla, con las piernas mas largas.
+        // Lo que se mezcla son los deltas de articulacion, y el fk se calcula
+        // una sola vez sobre la pose ya mezclada.
+        //
+        // Y si HUBO mezcla, el fkState que nos pasan ya no vale: es el de la
+        // pose sin mezclar. Por eso se descarta y se recalcula. Cuando NO hay
+        // mezcla se respeta el fkState recibido y aqui no se recalcula nada:
+        // en el 95% de los frames esto no cuesta absolutamente nada.
+        const o = opts;
+        if (o && o.clip != null) {
+            const mezclada = this.blender.push(
+                o.clip,
+                p,
+                o.dur != null ? o.dur : BLEND.LOCO,
+                o.dt != null ? o.dt : 1 / 60
+            );
+            if (mezclada !== p) {
+                p = mezclada;
+                st = null;
+            }
+        }
+        if (!st) st = fk(this.rig, p);
+
         const inv = 1 / this.modelScale;
 
         // Se recorre EN ORDEN DE JERARQUIA. Babylon vuelve a componer la
@@ -471,6 +511,29 @@ export class CharacterModel {
             );
         }
         return st;
+    }
+
+    /**
+     * Pone una pose SIN MEZCLA y deja el mezclador DSA.
+     *
+     * Para lo que no admite transicion: caerse del ring, reaparecer, un
+     * teletransporte. Mezclar ahi produce un barrido de cuerpo por la pantalla
+     * que no parece un efecto, parece un fallo. Cortando ademas la mezcla que
+     * hubiera a medias, el proximo frame no hereda una foto de donde estaba
+     * el peleador hace dos fotogramas.
+     *
+     * @param {object} pose  Pose de deltas
+     * @param {string} clip  el clip al que se pasa
+     * @returns {object} el fkState usado
+     */
+    applyPoseInstant(pose, clip) {
+        const p = this.blender.instant(clip, pose || this.pose);
+        return this.applyPose(p, null);
+    }
+
+    /** Estado del mezclador, para el HUD de depuracion. */
+    blendInfo() {
+        return this.blender.info();
     }
 
     /**

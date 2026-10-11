@@ -57,7 +57,12 @@ const esperados = {
     RUN_ATTACKS: 'objeto',
     readLoco: 'funcion',
     Cloth: 'objeto',
-    InputRouter: 'funcion'
+    InputRouter: 'funcion',
+    // blending
+    PoseBlender: 'funcion',
+    blendFor: 'funcion',
+    BLEND: 'objeto',
+    EASE: 'objeto'
 };
 for (const [k, tipo] of Object.entries(esperados)) {
     const v = facade[k];

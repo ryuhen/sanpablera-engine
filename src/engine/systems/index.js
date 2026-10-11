@@ -102,8 +102,10 @@ export {
 // 5. ANY-POINT CANCEL
 //
 // El cancel ya esta en la tabla (cancelTier) y las transiciones respetan el
-// frame data. Falta el BLENDING entre animaciones: hoy el motor salta de un
-// clip a otro sin mezclar.
+// frame data. Y el BLENDING entre animaciones ya esta: PoseBlender mezcla los
+// deltas de articulacion ANTES del fk, con una duracion por tipo de cambio (un
+// impacto es seco, un paso es blando). Falta lo que el cancel significa de
+// verdad: que se pueda ENCADEGAR golpe dentro de la recuperacion de otro.
 // ---------------------------------------------------------------------------
 export { default as StateMachine } from '../../core/fsm/StateMachine.js';
 export { resolve as resolveTransition, explain as explainTransition, allRules, validateTargets } from '../../core/fsm/Transitions.js';
@@ -173,6 +175,7 @@ export {
 } from '../../core/locomotion.js';
 
 export { default as Cloth } from '../../core/cloth/Cloth.js';
+export { BLEND, EASE, PoseBlender, blendFor, pesoDe } from '../../core/anim/Blend.js';
 
 // ---------------------------------------------------------------------------
 // CONTROLES
@@ -196,7 +199,7 @@ export const SYSTEM_STATUS = Object.freeze({
     STANCE: { done: true, note: 'estancias, arbol de golpe por postura y derivacion de comandos' },
     IMPACT: { done: true, note: 'hitbox por golpe, altura, zonas y knockback' },
     FRAMEDATA: { done: true, note: 'startup/active/recovery, hitAdvantage, blockAdvantage e indice O(1)' },
-    CANCEL: { done: false, note: 'la tabla y las transiciones estan; falta el BLENDING entre clips' },
+    CANCEL: { done: false, note: 'tabla, transiciones y blending de clips hechos; falta el encadenado real golpe-en-recuperacion' },
     CLASH: { done: true, note: 'ataque x defensa, explotacion RPS, guardia y evasion por aire/pisoton' },
     GUARD_IK: { done: false, note: 'el IK coloca la guardia; falta la DEFLEXION que busca la extremidad' },
     GRAPPLE: { done: true, note: '30 estados uke/tori; faltan las variantes por disciplina y la cinematica' },
@@ -208,8 +211,8 @@ export const SYSTEM_STATUS = Object.freeze({
 
 /** Los sistemas a medio hacer, por orden de lo que bloquea mas. */
 export const PENDING = Object.freeze([
+    'CANCEL: encadenar golpe dentro de la recuperacion de otro',
     'GROUND: modelo posicional (monteja, control lateral, espalda, tortuga)',
-    'CANCEL: blending entre clips',
     'GUARD_IK: deflection (el brazo busca la extremidad del atacante)',
     'APPAREL: colgar la malla de las prendas de los huesos en runtime',
     'GRAPPLE: variantes por disciplina (judo, sambo, sumo, greco)'

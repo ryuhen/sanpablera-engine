@@ -34,6 +34,7 @@ import { createProfile, defineState } from '../fsm/StateCatalog.js';
 import { registerCharacterStances } from '../fsm/states/CharacterStates.js';
 import * as Boxer from '../boxing.js';
 import * as FighterRig from './FighterRig.js';
+import { BLEND, blendFor } from '../anim/Blend.js';
 
 const { State, StateGroup, Intent, TransitionSource, CONFIG } = SPF;
 
@@ -164,6 +165,11 @@ export class FighterEntity {
         // la tela del peleador, si el engine le ha dado una.
         this._hitMove = null;
         this.cape = null;
+
+        // El siguiente frame se pone la pose SIN MEZCLA. Lo pide el ring-out:
+        // el mundo cambia entero de golpe y mezclar seria un barrido de cuerpo
+        // que parece un fallo de render. Dura un frame y se apaga solo.
+        this._cutBlend = false;
 
         if (!registeredCharacters.has(this.characterId)) {
             registerCharacterStances(this.characterId, defineState);
@@ -782,6 +788,24 @@ export class FighterEntity {
         f.facing = Math.atan2(o.fighter.x - f.x, o.fighter.z - f.z);
     }
 
+    /**
+     * Pide que el siguiente frame se escriba la pose sin mezclar.
+     *
+     * Lo llama el engine cuando el mundo da un salto (ring-out, reaparicion).
+     * Mezclar el cuerpo entre "estaba en las cuerdas" y "esta en el centro"
+     * produce un barrido a lo largo de toda la pantalla que no parece un
+     * efecto, parece que el render va roto.
+     */
+    cutBlend() {
+        this._cutBlend = true;
+        return this;
+    }
+
+    /** Estado del mezclador, para el HUD de depuracion. */
+    blendInfo() {
+        return this.model.blendInfo ? this.model.blendInfo() : null;
+    }
+
     _pose(world, dt) {
         const fsm = this.fsm;
         const state = fsm.state;
@@ -836,7 +860,31 @@ export class FighterEntity {
             res = FighterRig.poseFor(this.model.rig, snap, opts);
         }
 
-        this.model.applyPose(res.pose, res.state);
+        // --- EL BLENDING ------------------------------------------------------
+        //
+        // El clip es lo unico que decide si hay mezcla. Es una cadena con el
+        // origen delante, porque un estado de la FSM puede llamarse igual que
+        // uno de la locomocion y NO son el mismo clip: sin el prefijo, cambiar
+        // entre los dos no mezclaria y el cuerpo daria un salto.
+        //
+        // La duracion sale de los GRUPOS del estado destino, no del estado
+        // concreto: hay treinta estados de agarre y todos entran igual.
+        // `blendFor` pone el impacto el primero de todo, porque un estado
+        // puede estar en varios grupos a la vez (golpear a quien esta en el
+        // suelo) y en ese caso manda el seco: la reaccion tiene que estar en
+        // el mismo frame o no se ve que te han pegado.
+        const clip = combat ? 'FSM:' + state.id : 'LOCO:' + this.loco.state;
+        const dur = combat ? blendFor(state.groups, BLEND.LOCO) : BLEND.LOCO;
+
+        // Un corte de mezcla dura UN frame. Lo que lo pide es el ring-out: el
+        // mundo entero cambia de golpe (de las cuerdas al centro) y mezclar el
+        // cuerpo entre las dos mitades produce un barrido que parece un fallo.
+        if (this._cutBlend) {
+            this._cutBlend = false;
+            this.model.applyPoseInstant(res.pose, clip);
+        } else {
+            this.model.applyPose(res.pose, res.state, { clip: clip, dur: dur, dt: dt });
+        }
         this.model.place(this.fighter.x, this.fighter.z, this.fighter.facing);
 
         // La tela va DESPUES de la pose: la costura se ata a los huesos con la
