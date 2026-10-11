@@ -73,7 +73,22 @@ const esperados = {
     SUELO_POS: 'objeto',
     SUELO_BOTON: 'objeto',
     CASTIGO: 'objeto',
-    ACERCAMIENTO: 'objeto'
+    ACERCAMIENTO: 'objeto',
+    // stance y cinematica
+    resolverStance: 'funcion',
+    sueloAccionDeBoton: 'funcion',
+    accionDeDireccion: 'funcion',
+    sueloLectura: 'funcion',
+    sueloPlan: 'funcion',
+    planDeReposo: 'funcion',
+    capaEn: 'funcion',
+    capaDeReposo: 'funcion',
+    planoPara: 'funcion',
+    tieneGuion: 'funcion',
+    SUELO_STANCE: 'objeto',
+    SUELO_GUION: 'objeto',
+    SUELO_MAPEO: 'objeto',
+    ALTO_PLANO: 'objeto'
 };
 for (const [k, tipo] of Object.entries(esperados)) {
     const v = facade[k];

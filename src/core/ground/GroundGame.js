@@ -43,6 +43,12 @@ import {
 import {
     BOTON, castigoDe, resolverGiro, sumisionDe, proyeccionDe, GIRO_NECESARIO
 } from './punish.js';
+import {
+    STANCE, resolverStance, accionDeBoton, accionDeDireccion, lecturaDe
+} from './stance.js';
+import {
+    planDe, planDeReposo, capaEn, capaDeReposo, tieneGuion
+} from './groundCine.js';
 
 /**
  * El combate de suelo de UNA pelea. Los dos peleadores comparten este objeto.
@@ -224,6 +230,112 @@ export class GroundFight {
     /** Como se llega al suelo desde lejos. */
     acercarse(distancia) {
         return mejorAcercamiento(distancia);
+    }
+
+    // -----------------------------------------------------------------------
+    // LA STANCE Y LA CINEMATICA
+    //
+    // Son las dos mitades que el motor llama en cada frame, y estan aqui
+    // juntas a proposito: la pregunta que se hace es "que esta haciendo este
+    // cuerpo ahora", y la respuesta son las tres cosas a la vez (postura,
+    // relacion, plano). Separarlas obligaria al motor a hacer tres llamadas y
+    // a recordar en que orden.
+    // -----------------------------------------------------------------------
+
+    /**
+     * Que puede hacer este cuerpo con ESE boton ahora mismo.
+     *
+     * @param {string} stance  STANCE, la postura del cuerpo
+     * @param {string} boton   BOTON.LIGERO / PESADO / GUARDIA / ACCION
+     * @param {string} [rol]   que papel juega este cuerpo
+     * @param {number} [energia]
+     * @returns {object|null} la accion resuelta, o null si ese boton no hace
+     *   nada desde aqui. Null y no un error: que un boton no sirva es lo
+     *   normal en un estado concreto.
+     */
+    conBoton(stance, boton, rol = ROL.ABAJO, energia = 99) {
+        return accionDeBoton(stance, boton, this.pos, energia);
+    }
+
+    /** Lo mismo, pero con la direccion del mando. */
+    conDireccion(stance, direccion, rol = ROL.ABAJO, energia = 99) {
+        return accionDeDireccion(stance, direccion, this.pos, energia);
+    }
+
+    /**
+     * Ejecuta una accion de la stance y actualiza la pelea.
+     *
+     * Aqui es donde las tres piezas se juntan de verdad: se decide si el
+     * cuerpo puede hacerlo, si la jugada es legal en la posicion de ahora, y
+     * si sale, se cambia la posicion y se AVISA para que la cinematema sepa que
+     * hay que enseñar otra cosa.
+     *
+     * @returns {object} el resultado de `resolverStance`, mas `pelicula`:
+     *   el plan de camara de esa accion. Va SIEMPRE, tambien cuando la
+     *   jugada no se pudo hacer: en ese caso el plan es el de reposo, porque
+     *   si no pasa nada, el plano tiene que ser el plano base.
+     */
+    actuar(stance, accion, rol = ROL.ABAJO, energia = 99) {
+        const r = resolverStance({
+            stance: stance, accion: accion, pos: this.pos,
+            rol: rol, energia: energia, framesInside: this.frames
+        });
+
+        // SIEMPRE hay pelicula, success o failure. Un fallo es informacion
+        // para la camara tambien: si el de abajo intenta salir y no puede,
+        // ESO es lo que hay que ver.
+        r.pelicula = tieneGuion(accion) ? planDe(accion) : planDeReposo();
+
+        if (r.ok) {
+            if (r.posicionCambiada && r.posTras !== this.pos) {
+                const antes = this.pos;
+                this.pos = r.posTras;
+                this.frames = 0;
+                this.giro = 0;
+                this.enSuelo = this.pos !== POS.DE_PIE;
+                this._anotar(accion);
+                this.bus.emit(r.invierte ? EV.REVERSAL : EV.POSITION_UP,
+                    { desde: antes, hasta: this.pos, rol: rol, por: accion });
+            } else {
+                this._anotar(accion);
+            }
+        } else if (r.motivo === MOTIVO.FUERA_DE_VENTANA) {
+            this.bus.emit(EV.ESCAPE_BLOCKED, { pos: this.pos, rol: rol, motivo: r.motivo });
+        }
+        return r;
+    }
+
+    /**
+     * El plan de camara de ESTE frame.
+     *
+     * @param {string} [accion] la accion en curso; si no hay ninguna, sale el
+     *   plano de reposo, que es lo que se ve el 90% del tiempo
+     * @param {number} [frame] frame dentro de la secuencia
+     * @returns {object} { existe, plano, capa } · `plano` y `capa` son null si
+     *   la secuencia ya acabo, y eso es lo normal: se deja la camara como
+     *   estaba y no se superpone nada.
+     */
+    pelicula(accion = null, frame = 0) {
+        if (!accion || !tieneGuion(accion)) {
+            const r = planDeReposo();
+            return { existe: true, plano: r.planos[0], capa: capaDeReposo(frame) };
+        }
+        const e = (() => {
+            const p = planDe(accion);
+            let f = Math.max(0, frame);
+            for (let i = 0; i < p.planos.length; i++) {
+                if (f < p.planos[i].dur) return { plano: p.planos[i], i: i, dentro: f, t: f / p.planos[i].dur };
+                f -= p.planos[i].dur;
+            }
+            return null;
+        })();
+        if (!e) return { existe: false, plano: null, capa: [] };
+        return { existe: true, plano: e.plano, capa: capaEn(accion, frame) };
+    }
+
+    /** La lectura completa de un cuerpo en el suelo, para el HUD. */
+    leer(stance, rol = ROL.ABAJO) {
+        return lecturaDe(stance, this.pos, rol, this.frames);
     }
 
     _anotar(motivo) {

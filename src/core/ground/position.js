@@ -95,6 +95,7 @@ export const MOTIVO = Object.freeze({
 /** Las posiciones. El nombre dice donde esta el de ABAJO y quien lo tiene. */
 export const POS = Object.freeze({
     DE_PIE: 'DE_PIE',
+    CAIDO_LIBRE: 'CAIDO_LIBRE',
     GUARDIA_ABIERTA: 'GUARDIA_ABIERTA',
     GUARDIA_CERRADA: 'GUARDIA_CERRADA',
     MEDIA_GUARDIA: 'MEDIA_GUARDIA',
@@ -144,19 +145,52 @@ const T = Object.freeze({
     // AVANZAR aqui es el DERRIBO que sale bien, y el que lo ejecuta se queda
     // arriba. Sin esta linea el suelo no se puede empezar nunca: desde DE_PIE
     // todas las listas estan vacias y el combate se queda en pie para siempre.
+    //
+    // El primero es CAIDO_LIBRE y no la guardia porque el PRIMER destino es el
+    // que devuelve `resolverSuelo`: un derribo te deja tirado en la lona, y a
+    // la guardia abierta se llega desde ahi agarrando despues.
     DE_PIE: Object.freeze({
         nombre: 'Los dos de pie',
         rango: 0,
         arriba: false, // todavia no hay "de arriba"
         peligro: 0, presion: 0, ventana: 0,
         ataca: [], sumision: [],
-        sube: [POS.GUARDIA_ABIERTA], // el derribo sale y cae a guardia abierta
+        sube: [POS.CAIDO_LIBRE, POS.GUARDIA_ABIERTA],
         baja: [], escapa: [], invierte: [], rosca: []
+    }),
+
+    // --- UNO TIRADO EN LA LONA Y EL OTRO DE PIE, SIN AGARRE ---------------
+    //
+    // Esta posicion es la que une el DERRIBO con el suelo, y sin ella el
+    // modelo tenia un agujero: caes, y lo primero que decia era "guardia
+    // abierta", que no es verdad. Un derribo te deja tumbado en la lona con el
+    // otro de pie encima, sin que os hayais cogido. Agarre cero.
+    //
+    // Es tambien la que hace que la STANCE tenga trabajo (stance.js): aqui el
+    // de abajo puede levantarse, enroscarse o cerrar guardia, y el de arriba
+    // puede castigar o subirse encima. Sin esta posicion, `LEVANTARSE` no
+    // tendria sentido en ningun sitio del modelo.
+    CAIDO_LIBRE: Object.freeze({
+        rango: 1,
+        nombre: 'Tirado en la lona, el otro de pie',
+        arriba: true,
+        peligro: 4, presion: 2, ventana: 45,
+        ataca: [ZONA.CABEZA, ZONA.TORSO],
+        sumision: [],
+        // Solo a la guardia abierta: antes de pasar las piernas hay que agarrar
+        // algo. Con `PASADO` aqui el salto seria de +5 rangos, de "tirado en
+        // la lona" a "pasando las piernas" sin pasar por delante, y eso no es un
+        // paso, es un teletransporte. La escalera se sube de uno en uno.
+        sube: [POS.GUARDIA_ABIERTA],
+        baja: [POS.DE_PIE],
+        escapa: [POS.GUARDIA_ABIERTA, POS.GUARDIA_CERRADA],
+        invierte: [POS.DE_PIE],
+        rosca: [POS.TORTUGA]
     }),
 
     // --- el de abajo con las piernas fuera, sin atrapar nada --------------
     GUARDIA_ABIERTA: Object.freeze({
-        rango: 1,
+        rango: 2,
         nombre: 'Guardia abierta',
         arriba: true,
         peligro: 3, presion: 4, ventana: 60,
@@ -171,7 +205,7 @@ const T = Object.freeze({
 
     // --- LA TRAMPA: el de arriba se queda dentro de las piernas ------------
     GUARDIA_CERRADA: Object.freeze({
-        rango: 2,
+        rango: 3,
         nombre: 'Guardia cerrada',
         arriba: true,
         peligro: 2, presion: 8, ventana: 90,
@@ -186,7 +220,7 @@ const T = Object.freeze({
 
     // --- una rodilla dentro: el de arriba pasa pero no sin trabajo -------
     MEDIA_GUARDIA: Object.freeze({
-        rango: 3,
+        rango: 4,
         nombre: 'Media guardia',
         arriba: true,
         peligro: 4, presion: 5, ventana: 40,
@@ -201,7 +235,7 @@ const T = Object.freeze({
 
     // --- el de abajo se enrosca. No offensive, pero tampoco se le hace nada -
     TORTUGA: Object.freeze({
-        rango: 4,
+        rango: 5,
         nombre: 'Tortuga',
         arriba: true,
         peligro: 2, presion: 6, ventana: 0, // 0: el mismo la ha elegido
@@ -216,7 +250,7 @@ const T = Object.freeze({
 
     // --- EL MOMENTO. El de arriba se ha comprometido a pasar las piernas ---
     PASADO: Object.freeze({
-        rango: 5,
+        rango: 6,
         nombre: 'Pasando las piernas',
         arriba: true,
         peligro: 7, presion: 9, ventana: 30, // la ventana mas corta de abajo
@@ -231,7 +265,7 @@ const T = Object.freeze({
 
     // --- de costado, torso y un brazo atados ------------------------------
     CONTROL_LATERAL: Object.freeze({
-        rango: 6,
+        rango: 7,
         nombre: 'Control lateral',
         arriba: true,
         peligro: 6, presion: 1, ventana: 25,
@@ -253,7 +287,7 @@ const T = Object.freeze({
 
     // --- brazo y cuello atrapados: el remate de las costillas -------------
     CRUCIFIX: Object.freeze({
-        rango: 7,
+        rango: 8,
         nombre: 'Crucifix',
         arriba: true,
         peligro: 8, presion: 1, ventana: 20,
@@ -268,7 +302,7 @@ const T = Object.freeze({
 
     // --- sentado encima ----------------------------------------------------
     MONTEJA: Object.freeze({
-        rango: 8,
+        rango: 9,
         nombre: 'Monteja',
         arriba: true,
         peligro: 9, presion: 0, ventana: 18,
@@ -288,7 +322,7 @@ const T = Object.freeze({
 
     // --- monteja girada: torso contra rostro -------------------------------
     MEDIA_MONTEJA: Object.freeze({
-        rango: 9,
+        rango: 10,
         nombre: 'Media monteja',
         arriba: true,
         peligro: 9, presion: 0, ventana: 16,
@@ -303,7 +337,7 @@ const T = Object.freeze({
 
     // --- espalda sin ganchos: se sostiene, pero le falta uno para acabar --
     ESPALDA: Object.freeze({
-        rango: 10,
+        rango: 11,
         nombre: 'Espalda (sin gancho)',
         arriba: true,
         peligro: 9, presion: 0, ventana: 12,
@@ -318,7 +352,7 @@ const T = Object.freeze({
 
     // --- espalda con los dos ganchos. Ahi se acaba el suelo --------------
     ESPALDA_GANCHO: Object.freeze({
-        rango: 11,
+        rango: 12,
         nombre: 'Espalda con gancho',
         arriba: true,
         peligro: 10, presion: 0, ventana: 0, // 0: no hay salida
@@ -486,7 +520,12 @@ export function resolverSuelo(pos, rol, evento, framesInside = 0) {
         destinos = i.rosca;
         coste = COSTE.ROSCAR;
     } else if (evento === GEV.LEVANTAR) {
-        destinos = i.invierte.includes(POS.DE_PIE) ? [POS.DE_PIE] : [];
+        // Ponerse de pie se puede desde cualquier posicion donde quede margen, y
+        // NO se puede desde las que tienen la ventana a cero (espalda con
+        // gancho, tortuga): ahi ya no hay manera de levantarse. Con esto
+        // `LEVANTARSE` es de verdad la salida de emergencia y no un boton
+        // muerto que nunca sale.
+        destinos = i.ventana > 0 ? [POS.DE_PIE] : [];
         coste = COSTE.ESCAPAR;
     }
 

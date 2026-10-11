@@ -52,12 +52,12 @@ const { BOTON, ACCION, SUM, CASTIGO, castigoDe, resolverGiro, sumisionDe,
 section('1. La tabla');
 // ===========================================================================
 
-check('hay 12 posiciones', POSICIONES.length === 12, POSICIONES.length);
+check('hay 13 posiciones (las doce de suelo mas el caido libre)', POSICIONES.length === 13, POSICIONES.length);
 check('toda posicion tiene ficha', POSICIONES.every(p => !!info(p)), POSICIONES.filter(p => !info(p)));
 check('la ficha dice si hay alguien arriba',
     POSICIONES.every(p => typeof hayArriba(p) === 'boolean'));
 check('de pie NO hay nadie arriba', hayArriba(POS.DE_PIE) === false);
-check('las otras once si', POSICIONES.filter(p => p !== POS.DE_PIE).every(hayArriba));
+check('las otras doce si', POSICIONES.filter(p => p !== POS.DE_PIE).every(hayArriba));
 check('peligro entre 0 y 10 en todas',
     POSICIONES.every(p => { const n = peligroDe(p); return n >= 0 && n <= 10; }),
     POSICIONES.map(p => [p, peligroDe(p)]).filter(x => x[1] < 0 || x[1] > 10));
@@ -80,6 +80,38 @@ check('la tabla congelada es de verdad: no se puede escribir en ella',
     check('info de lo que no existe es null', info('NO_EXISTE') === null);
 }
 
+{
+    // LA POSICION QUE UNE EL DERRIBO CON EL SUELO. Sin ella, `LEVANTARSE` no
+    // tendria sitio: caes, y el modelo decia "guardia abierta", que es mentira
+    // porque un derribo no es un agarre. Aqui se comprueba que existe, que se
+    // entra desde de pie y que desde ahi se puede pasar al suelo y levantarse.
+    check('CAIDO_LIBRE existe', !!info(POS.CAIDO_LIBRE));
+    check('y se entra desde los dos de pie (el derribo sale bien)', (() => {
+        return info(POS.DE_PIE).sube.indexOf(POS.CAIDO_LIBRE) !== -1;
+    })(), info(POS.DE_PIE).sube);
+    check('y es lo primero a lo que se entra: un derribo te deja tirado', (() => {
+        return resolverSuelo(POS.DE_PIE, ROL.ARRIBA, GEV.AVANZAR, 0).to === POS.CAIDO_LIBRE;
+    })());
+    check('desde ahi el de abajo puede levantarse (de ahi sale la levantada)', (() => {
+        const r = resolverSuelo(POS.CAIDO_LIBRE, ROL.ABAJO, GEV.LEVANTAR, 0);
+        return r.ok === true && r.to === POS.DE_PIE;
+    })(), resolverSuelo(POS.CAIDO_LIBRE, ROL.ABAJO, GEV.LEVANTAR, 0));
+    check('o cerrarse la guardia', (() => {
+        const r = resolverSuelo(POS.CAIDO_LIBRE, ROL.ABAJO, GEV.ESCAPAR, 0);
+        return r.ok === true && r.to === POS.GUARDIA_ABIERTA;
+    })(), resolverSuelo(POS.CAIDO_LIBRE, ROL.ABAJO, GEV.ESCAPAR, 0));
+    check('y el de arriba puede castigarle o subirse encima', (() => {
+        return puedeCastigar(POS.CAIDO_LIBRE, P.ZONA.CABEZA).ok === true &&
+               resolverSuelo(POS.CAIDO_LIBRE, ROL.ARRIBA, GEV.AVANZAR, 0).to === POS.GUARDIA_ABIERTA;
+    })());
+    check('y al que no se le puede cerrar elMale la ventana en un frame', (() => {
+        // La ventana de CAIDO_LIBRE es generosa (45) a proposito: es el sitio
+        // donde el de abajo tiene mas margen, y de ahi salio el fallo de que
+        // levantarse no tenia sentido en ninguna parte.
+        return ventanaDe(POS.CAIDO_LIBRE) >= 40;
+    })(), ventanaDe(POS.CAIDO_LIBRE));
+}
+
 check('un evento que no existe tampoco revienta', (() => {
     const r = resolverSuelo(POS.MONTEJA, ROL.ARRIBA, 'EVENTO_FANTASMA', 0);
     return r.ok === false && r.motivo === MOTIVO.SIN_SALIDA;
@@ -89,13 +121,13 @@ check('un evento que no existe tampoco revienta', (() => {
 section('2. La escalera NO es una lista ordenada');
 // ===========================================================================
 
-check('el rango va de 0 (de pie) a 11 (espalda con gancho)', (() => {
+check('el rango va de 0 (de pie) a 12 (espalda con gancho)', (() => {
     const r = porRango();
-    return rangoDe(r[0]) === 0 && rangoDe(r[r.length - 1]) === 11;
+    return rangoDe(r[0]) === 0 && rangoDe(r[r.length - 1]) === 12;
 })(), porRango().map(p => [p, rangoDe(p)]));
-check('los rangos son 0..11 sin huecos ni repeticiones', (() => {
+check('los rangos son 0..12 sin huecos ni repeticiones', (() => {
     const rs = porRango().map(rangoDe);
-    return rs.length === 12 && rs.every((v, i) => v === i);
+    return rs.length === 13 && rs.every((v, i) => v === i);
 })(), porRango().map(rangoDe));
 check('el peligro va de 0 a 10 a lo largo de la escalera', (() => {
     const r = porPeligro();
@@ -142,7 +174,7 @@ check('esPeor no miente cuando son la misma', esPeor(POS.MONTEJA, POS.MONTEJA) =
 check('porPeligro() no devuelve la tabla de dentro (si la ordenas, la rompes)', (() => {
     const a = porPeligro();
     a.push('BASURA');
-    return porPeligro().indexOf('BASURA') === -1 && POSICIONES.length === 12;
+    return porPeligro().indexOf('BASURA') === -1 && POSICIONES.length === 13;
 })());
 
 // ===========================================================================

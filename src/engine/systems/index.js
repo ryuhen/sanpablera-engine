@@ -169,6 +169,16 @@ export {
     castigoDe, resolverGiro, sumisionDe, proyeccionDe, posicionesDeRemate
 } from '../../core/ground/punish.js';
 export { GroundFight, GroundSystem } from '../../core/ground/GroundGame.js';
+export {
+    STANCE as SUELO_STANCE, ACCION as SUELO_STANCE_ACCION, STANCES as SUELO_STANCES,
+    MOTIVO as SUELO_STANCE_MOTIVO, MAPEO as SUELO_MAPEO, DIRECCION_DE as SUELO_DIRECCION,
+    resolverStance, accionDeBoton as sueloAccionDeBoton, accionDeDireccion, lecturaDe as sueloLectura
+} from '../../core/ground/stance.js';
+export {
+    GUION as SUELO_GUION, ALTO_PLANO, REPOSO_ENTRELAZADO as SUELO_REPOSO,
+    guionDe, duracionDe, planoEn, capaEn, pesoDelBeat,
+    planDe as sueloPlan, planDeReposo, capaDeReposo, planoPara, tieneGuion
+} from '../../core/ground/groundCine.js';
 export { default as ImpactStates } from '../../core/fsm/states/ImpactStates.js';
 
 // ---------------------------------------------------------------------------
@@ -215,7 +225,7 @@ export const SYSTEM_STATUS = Object.freeze({
     CLASH: { done: true, note: 'ataque x defensa, explotacion RPS, guardia y evasion por aire/pisoton' },
     GUARD_IK: { done: false, note: 'el IK coloca la guardia; falta la DEFLEXION que busca la extremidad' },
     GRAPPLE: { done: true, note: '30 estados uke/tori; faltan las variantes por disciplina y la cinematica' },
-    GROUND: { done: false, note: 'modelo posicional (12 posiciones, ventana de escape, giro por costillas) y castigo por zonas HECHOS y probados; falta un estado de la FSM por posicion y conectarlos a los botones' },
+    GROUND: { done: false, note: 'modelo posicional (13 posiciones), castigo por zonas, stance de 5 posturas con 10 acciones y cinematica de superposicion (10 guiones): TODO hecho y probado; falta un estado de la FSM por posicion y por accion' },
     AIR: { done: true, note: 'seis saltos, tres familias de ataque aereo y el antiaereo desde el suelo' },
     LOCOMOTION: { done: true, note: 'paso por toque frente a caminata, paso largo, dash y ataques corriendo' },
     CLOTH: { done: true, note: 'tela por cadenas de verlet cosida a los hombros' }
