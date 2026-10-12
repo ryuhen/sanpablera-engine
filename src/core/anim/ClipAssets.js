@@ -94,7 +94,34 @@ export const ARCHIVOS = Object.freeze({
     interact: { loop: true, uso: 'agarre / interaccion' },
     laytoidle: { loop: false, uso: 'levantarse del suelo' },
     fixing_kneeling: { loop: true, uso: 'arrodillado' },
-    chest_open: { loop: false, uso: 'abrir los brazos' }
+    chest_open: { loop: false, uso: 'abrir los brazos' },
+
+    // --- segunda tanda: los que SI resuelven huecos ------------------------
+    death01: { loop: false, uso: 'caer al suelo (2,4 s, la cadera gira 87 grados)' },
+    overhandthrow: { loop: false, uso: 'lanzamiento: es lo que es un derribo' },
+    slide_exit: { loop: false, uso: 'levantarse del deslizamiento' },
+    climbup_1m: { loop: false, uso: 'subir desde abajo' },
+    melee_hook_rec: { loop: false, uso: 'la recuperacion del gancho' },
+    sword_block: { loop: false, uso: 'bloqueo con escudo' },
+    sword_dash: { loop: false, uso: 'dash con espada' },
+    sword_regular_a: { loop: false, uso: 'tajo A' },
+    sword_regular_a_rec: { loop: false, uso: 'recuperacion del tajo A' },
+    sword_regular_b: { loop: false, uso: 'tajo B' },
+    sword_regular_b_rec: { loop: false, uso: 'recuperacion del tajo B' },
+    sword_regular_c: { loop: false, uso: 'tajo C' },
+    sword_regular_combo: { loop: false, uso: 'combo de tres tajos' },
+    sword_heavy_combo: { loop: false, uso: 'combo pesado (4,3 s)' },
+    sitting_enter: { loop: false, uso: 'sentarse: bajar de rodillas al suelo' },
+    sitting_idle_loop: { loop: true, uso: 'quieto sentado' },
+    sitting_exit: { loop: false, uso: 'levantarse de sentado' },
+    push_loop: { loop: true, uso: 'empujar' },
+    ninjajump_start: { loop: false, uso: 'salto ninja: despegue' },
+    ninjajump_land: { loop: false, uso: 'salto ninja: aterrizaje' },
+    ninjajump_idle_loop: { loop: true, uso: 'salto ninja: en el aire' },
+    idle_foldarms_loop: { loop: true, uso: 'reposo con los brazos cruzados' },
+    idle_no_loop: { loop: false, uso: 'reposo sin bucle' },
+    idle_rail_loop: { loop: true, uso: 'estatica de apoyo' },
+    idle_talking_loop: { loop: true, uso: 'gesto de hablar' }
 });
 
 /**
@@ -138,10 +165,33 @@ export const CLIP_A_ARCHIVO = Object.freeze({
     air_recover: 'jump_land',
     wakeup_crouch: 'laytoidle',
     wakeup_prone: 'laytoidle',
-    kneel: 'fixing_kneeling',
+    kneel: 'sitting_enter',
     stance_base: 'idle_loop',
     backdash: 'sprint_loop',
-    dash_side: 'sprint_loop'
+    dash_side: 'sprint_loop',
+
+    // --- de pie, otras estancas -----------------------------------------
+    // Los boxer del juego son siluetas, y una idle con los brazos cruzados
+    // o/andando con algo se lee como estanca distinta sin inventar nada.
+    idle_brazos_cruzados: 'idle_foldarms_loop',
+    idle_sin_bucle: 'idle_no_loop',
+    idle_hablando: 'idle_talking_loop',
+    idle_apoyado: 'idle_rail_loop',
+
+    // --- combinaciones ---------------------------------------------------
+    // Un combo son tres o cuatro golpes encadenados. El motor no encadena
+    // clips distintos (el tablero da UN nombre), asi que el combo entero va
+    // en un clip largo: es lo unico que se puede ver de verdad, porque un
+    // tablero que encadena tres nombres a la vez ya no es un tablero.
+    combo_pesado: 'sword_heavy_combo',
+    combo_medio: 'sword_regular_combo',
+
+    // --- golpes de cuerpo entero ----------------------------------------
+    // Un derribo y un golpe desde arriba en el suelo SON un lanzamiento. No es
+    // una reserva: es el mismo gesto, grabado con una espada que el juego no
+    // ensena. Se dice aqui y no en RESERVADO precisamente por eso.
+    sp_derribo: 'overhandthrow',
+    rv_top_strike: 'overhandthrow',
 });
 
 /**
@@ -172,8 +222,11 @@ export const RESERVADO = Object.freeze({
 
     // El suelo: no hay clip de caida tendida, se sirve el que mas se le
     // parece y el motor mezcla encima la postura tendida.
-    down_prone: 'laytoidle',
-    down_supine: 'laytoidle',
+    down_prone: 'death01',
+    down_supine: 'death01',
+
+    // Un dash agachado ES el arranque de un deslizamiento.
+    couch_dash: 'slide_start',
 
     // El gancho es el unico agarre grabado, asi que es el agarre por defecto.
     rv_agarre_pie: 'melee_hook',
@@ -187,7 +240,8 @@ export const RESERVADO = Object.freeze({
     rv_escape: 'melee_hook',
     rv_presion: 'melee_hook',
     rv_clinch: 'melee_hook',
-    rv_bottom: 'melee_hook',
+    // `rv_top` SI entra aqui (el de arriba, de pie); `rv_bottom` NO, y esa
+    // diferencia es el motivo de que este gestor tenga dos listas.
     rv_top: 'melee_hook'
 });
 
@@ -221,17 +275,19 @@ export const SIN_ANIMACION = Object.freeze({
     st_patada_lateral: 'la patada de lado no es la de frente',
     sp_patada_giro: 'la patada giratoria se ve de espaldas',
     st_patada_baja: 'el barrido va al suelo y el jab no',
-    sp_derribo: 'el derribo acaba tumbando; el gancho no',
     sp_pasa_pie_abajo: 'la jugada de pasa pies es propia',
     sp_embestida: 'la embestida mueve el cuerpo entero hacia delante',
-    sp_sumision: 'la sumision es su propia jugada',
+    sp_sumision: 'la sumision es en el suelo y no hay ninguno grabado',
 
     // --- agarres tumbados ------------------------------------------------
+    // Los 13 agarres de PIE si tienen animacion (melee_hook). Los de SUELO no:
+    // no hay ninguna grabacion tumbada en el set, ystead de hacer un gancho
+    // de pie Creer que es un agarre tumbado, estos se quedan sin animacion.
+    rv_bottom: 'falta el agarre tumbado de abajo',
     rv_bottom_hit: 'falta el agarre tumbado de abajo',
-    rv_top_strike: 'falta el golpe desde arriba en el suelo',
     rv_bottom_escape: 'falta la fuga tumbada',
-    rv_top_escape: 'falta la fuga tumbada de arriba',
     rv_bottom_ukemi: 'falta la ukemi tumbada',
+    rv_top_escape: 'falta la fuga tumbada de arriba',
     rv_top_ukemi: 'falta la ukemi de arriba',
 
     // --- movilidad -------------------------------------------------------
@@ -240,7 +296,6 @@ export const SIN_ANIMACION = Object.freeze({
     quad: 'el gateo no es una agachada profunda',
     stagger: 'el tropiezo es un solo instante',
     acrobatics: 'la pirueta no es una rodada',
-    couch_dash: 'deslizarse agachado tiene otro ritmo',
     jump_dash: 'el dash en el aire no es el despegue'
 });
 
@@ -253,9 +308,25 @@ export const SIN_ANIMACION = Object.freeze({
  * respuesta y no haya que abrir el .glb a adivinar.
  */
 export const GUARDADOS = Object.freeze({
-    interact: 'agarre por proximidad; de momento los agarres usan melee_hook',
-    slide_start: 'el arranque del deslizamiento, para cuando se pueda encadenar con el bucle',
-    chest_open: 'abrir los brazos; es un gesto de victoria que el combate todavia no tiene'
+    interact: 'agarre por proximidad; los agarres usan melee_hook',
+    chest_open: 'abrir los brazos; es un gesto de victoria que el combate no tiene',
+    slide_exit: 'levantarse del deslizamiento; el motor no encadena clip de salida todavia',
+    climbup_1m: 'subir de una pared; no hay pared en el ring',
+    melee_hook_rec: 'la recuperacion del gancho; haria falta un clip de dos piezas',
+    sword_block: 'bloqueo con escudo; el bloqueo del juego es con las manos',
+    sword_dash: 'dash con espada; el juego no lleva espada',
+    sword_regular_a: 'tajo A; los golpes del juego son sin arma',
+    sword_regular_a_rec: 'recuperacion del tajo A',
+    sword_regular_b: 'tajo B; el juego no lleva espada, solo puños y patadas',
+    sword_regular_b_rec: 'recuperacion del tajo B; misma razon que el tajo B',
+    sword_regular_c: 'tajo C; el juego no lleva espada, solo puños y patadas',
+    fixing_kneeling: 'arrodillado quieto; de momento kneel usa sitting_enter',
+    push_loop: 'empujar; el combate no tiene empujon como estado',
+    ninjajump_start: 'el salto del juego ya tiene su propio despegue',
+    ninjajump_land: 'aterrizaje ninja; el juego tiene jump_land',
+    ninjajump_idle_loop: 'plan de vuelo ninja; el juego usa jump_loop',
+    sitting_idle_loop: 'quieto sentado; de momento solo se usa sitting_enter',
+    sitting_exit: 'levantarse de sentado; wakeup ya usa laytoidle'
 });
 
 /**
