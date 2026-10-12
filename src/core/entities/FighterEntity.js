@@ -79,6 +79,15 @@ export function attackStanceOf(fsm, input) {
 }
 import * as FighterRig from './FighterRig.js';
 import { BLEND, blendFor } from '../anim/Blend.js';
+// EL TABLERO Y EL RELOJ DE LOS CLIPS.
+//
+// Antes, la pose se elegia aqui mismo y el identificador de mezcla era
+// `'FSM:' + state.id`: un numero de estado, no un clip. Eso hacia tres cosas
+// mal (dos estados con la misma pose parpadeaban, el golpe puede cambiar dentro
+// del estado por la matriz de direcciones y la animacion no se enteraba, y
+// ningun ciclo tenia reloj propio). Ver `anim/ClipBoard.js` y `anim/ClipPlayer.js`.
+import { resolver as resolverClip, CLIP_DE_LOCO } from '../anim/ClipBoard.js';
+import { ClipPlayer } from '../anim/ClipPlayer.js';
 
 const { State, StateGroup, Intent, TransitionSource, CONFIG } = SPF;
 
@@ -214,6 +223,12 @@ export class FighterEntity {
         // el mundo cambia entero de golpe y mezclar seria un barrido de cuerpo
         // que parece un fallo de render. Dura un frame y se apaga solo.
         this._cutBlend = false;
+
+        // El reloj de los clips (anim/ClipPlayer). Uno por peleador: dos
+        // peleadores en el mismo estado pueden llevar clips distintos y a
+        // distinta velocidad, y un reloj compartido los haria dar un salto el
+        // mismo frame.
+        this.clips = new ClipPlayer();
 
         if (!registeredCharacters.has(this.characterId)) {
             registerCharacterStances(this.characterId, defineState);
@@ -1090,12 +1105,18 @@ export class FighterEntity {
      */
     cutBlend() {
         this._cutBlend = true;
+        this.clips.corte();
         return this;
     }
 
     /** Estado del mezclador, para el HUD de depuracion. */
     blendInfo() {
         return this.model.blendInfo ? this.model.blendInfo() : null;
+    }
+
+    /** Que clip se esta viendo y cuanto lleva puesto. Para el HUD y los tests. */
+    clipInfo() {
+        return this.clips.info();
     }
 
     _pose(world, dt) {
@@ -1152,20 +1173,42 @@ export class FighterEntity {
             res = FighterRig.poseFor(this.model.rig, snap, opts);
         }
 
-        // --- EL BLENDING ------------------------------------------------------
+        // --- EL CLIP, Y POR QUE LO DECIDE EL TABLERO ------------------------
         //
-        // El clip es lo unico que decide si hay mezcla. Es una cadena con el
-        // origen delante, porque un estado de la FSM puede llamarse igual que
-        // uno de la locomocion y NO son el mismo clip: sin el prefijo, cambiar
-        // entre los dos no mezclaria y el cuerpo daria un salto.
+        // El identificador de mezcla es el NOMBRE DEL CLIP, no el id del
+        // estado. Son cosas distintas y confundirlas hacia que la animacion
+        // fuera la del estado y no la de la ACCION:
         //
+        //   - NORMAL_A y NORMAL_B se ven igual (los dos son "de pie quieto"),
+        //     asi que con el id del estado el mezclador arrancaba una
+        //     transicion de 130 ms para llegar a la pose que ya estaba:
+        //     un parpadeo en el sitio. Con el clip no hay cambio, porque no hay
+        //     nada que cambiar.
+        //   - El GOLPE puede cambiar DENTRO del estado: `stanceAttackKey`
+        //     sustituye ATAQUE_LIGERO por GANCHO o por PUNO_ADELANTE_IZQ segun
+        //     la cruceta. Con el id del estado, el jab y el gancho se trataban
+        //     como el mismo clip y no mezclaban al cambiar de uno a otro.
+        //   - Los treinta estados de agarre se ven de cuatro maneras, y eso lo
+        //     dice el clip, no el numero del estado.
+        //
+        // El reloj (`ClipPlayer`) es lo que da a los CICLOS su propio tiempo:
+        // un ciclo de paso que se reanuda tiene que seguir por donde iba, no
+        // volver al principio porque el estado devolvio el control.
+        const clip = resolverClip({
+            id: state.id,
+            groups: state.groups,
+            posture: state.posture,
+            loco: this.loco.state,
+            move: fsm.move ? fsm.move.key : null
+        }).clip;
+        this.clips.avanzar(clip, dt, this._time);
+
         // La duracion sale de los GRUPOS del estado destino, no del estado
         // concreto: hay treinta estados de agarre y todos entran igual.
         // `blendFor` pone el impacto el primero de todo, porque un estado
         // puede estar en varios grupos a la vez (golpear a quien esta en el
         // suelo) y en ese caso manda el seco: la reaccion tiene que estar en
         // el mismo frame o no se ve que te han pegado.
-        const clip = combat ? 'FSM:' + state.id : 'LOCO:' + this.loco.state;
         const dur = combat ? blendFor(state.groups, BLEND.LOCO) : BLEND.LOCO;
 
         // Un corte de mezcla dura UN frame. Lo que lo pide es el ring-out: el

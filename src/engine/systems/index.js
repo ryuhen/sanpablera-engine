@@ -202,6 +202,13 @@ export {
     crearBiblioteca as crearClips, tDeClip, poseDe as poseDeClip, fichaDe as clipDe,
     tieneClip, nombres as nombresDeClip, cobertura as coberturaDeClips
 } from '../../core/anim/ClipLibrary.js';
+export {
+    resolver as clipDelEstado, familiaDe, clipDeGolpe, clipDeAgarre,
+    sinClip as estadosSinClip, ORIGEN as ORIGEN_CLIP,
+    FAMILIA as FAMILIA_DE_GOLPE, REPOSO as CLIP_REPOSO,
+    CLIP_DE_ESTADO, CLIP_DE_LOCO, CLIP_DE_FAMILIA, CLIP_DE_GOLPE, FAMILIA_DE_GOLPE
+} from '../../core/anim/ClipBoard.js';
+export { ClipPlayer, mezclaDe as mezclaDeClip } from '../../core/anim/ClipPlayer.js';
 
 // ---------------------------------------------------------------------------
 // CONTROLES

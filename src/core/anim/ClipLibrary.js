@@ -98,6 +98,41 @@ function clip(nombre, dur, loop, generador, extra = {}) {
 export function crearBiblioteca(deps) {
     const { locoPose, attackPose, stancePoseFn } = deps;
 
+    // =========================================================================
+    // LOS GENERADORES QUE ADEMAS APORTAN EL RIG COMPLETO
+    // ---------------------------------------------------------------------
+    // `locoPose`, `attackPose` y `stancePoseFn` son OBLIGATORIOS: los necesitan
+    // los clips de la primera mitad, y sin ellos esta biblioteca no tiene nada
+    // que devolver.
+    //
+    // Los de abajo son OPCIONALES, y no por pereza: son los que hacen falta
+    // para las RECONCIONES y el SUELO, que son las partes del cuerpo que el
+    // combate ya sabe hacer (`FighterRig.flinchPose`, `downPose`, `wakeupPose`)
+    // pero que viven en el rig y no en los tres generadores de siempre.
+    //
+    // Se pueden omitir porque la biblioteca se monta con generadores falsos en
+    // las pruebas (`tests/clips.smoke.mjs` pasa tres) y porque un motor que
+    // solo sepa hacer posturas todavia tiene que poder nombrar sus clips: si no,
+    // el tablero de `ClipBoard.js` pediria un clip que la biblioteca no tiene y
+    // el informe de cobertura diria que falta una animacion que en realidad solo
+    // necesita el generador del suelo.
+    //
+    // Cuando faltan, el clip NO se cae: usa un equivalente construido con
+    // `stancePoseFn`, que siempre esta. La pose sale peor pero sale, y el motor
+    // no se queda con el cuerpo en reposo a mitad de una reaccion.
+    // =========================================================================
+    const flinchPose = typeof deps.flinchPose === 'function' ? deps.flinchPose : null;
+    const downPose = typeof deps.downPose === 'function' ? deps.downPose : null;
+    const wakeupPose = typeof deps.wakeupPose === 'function' ? deps.wakeupPose : null;
+    const floatPose = typeof deps.floatPose === 'function' ? deps.floatPose : null;
+    const groundAttackPose = typeof deps.groundAttackPose === 'function' ? deps.groundAttackPose : null;
+    const attackPoseFor = typeof deps.attackPoseFor === 'function' ? deps.attackPoseFor : null;
+    // La BASE de la que parten los golpes. `attackPoseFor` la necesita resuelta
+    // (es la que clava las puntas en el suelo ANTES de mover la cadera), y sin
+    // ella los golpes se ven con los pies flotando.
+    const posturaBase = typeof deps.posturePose === 'function' ? deps.posturePose : stancePoseFn;
+
+
     // El generador de posturas entra POR PARAMETRO y no por import. Es lo que
     // hace que este archivo se pueda probar sin un rig entero delante: la
     // biblioteca decide QUE pose, y el generador decide COMO se hace. Si se
@@ -226,7 +261,7 @@ export function crearBiblioteca(deps) {
     }, { continuo: false, commitment: 0.55 });
 
     registrar('acrobatics', 0.80, false, (rig, t, opts) => {
-        //acrobatica: se estira y se recoge. Es un salto舞 mas: lo unico que
+        //acrobatica: se estira y se recoge. Es un salto mas: lo unico que
         // cambia es el `crouch` negativo, que en `stancePose` significa
         // ESTIRARSE (el cuerpo se alarga en vez de encogerse).
         const estira = Math.sin(Math.min(1, t) * Math.PI);
@@ -335,7 +370,34 @@ export function crearBiblioteca(deps) {
     // -----------------------------------------------------------------------
     const golpe = (nombre, moveKey, extra = {}) => {
         registrar(nombre, extra.dur || 0.4, false, (rig, t, opts) => {
-            return attackPose(rig, moveKey, (opts && opts.phase) || 'RECOVERY', t, opts || {});
+            const o = opts || {};
+            const phase = o.phase || 'RECOVERY';
+
+            // El castigo al RIVAL TUMBADO tiene silueta propia (un pie encima, las
+            // manos al suelo, la patada descendente) y sale de un generador que
+            // no es el del golpe. Se comprueba aqui y no en `poseFor` para que el
+            // camino sea el mismo de los demas: un clip, un generador.
+            if (o.downAttack) {
+                const kind = o.downAttack === true ? 'PIE' : o.downAttack;
+                if (groundAttackPose) {
+                    return groundAttackPose(rig, kind, phase, t, o);
+                }
+            }
+
+            // `attackPoseFor` es el generador con CONTEXTO: elige la base
+            // (de pie / agachado / aire / suelo) y la silueta del golpe. Es el
+            // que produce el jab agachado MAS BAJO que el de pie, que es una de
+            // las cosas que el motor ya sabia hacer y que `attackPose` a secas
+            // no puede dar.
+            if (attackPoseFor) {
+                const ctx = o.context || 'STAND';
+                const base = o.posture || posturaBase(rig,
+                    { limbs: 'BRACE', hipY: ctx === 'CROUCH' ? 0.52 : 0.88, spinePitch: 0.10 }, o);
+                return attackPoseFor(rig, moveKey, ctx, phase, t,
+                    Object.assign({}, o, { posture: base, silhouette: o.silhouette }));
+            }
+
+            return attackPose(rig, moveKey, phase, t, o);
         }, { continuo: false, commitment: extra.commitment != null ? extra.commitment : 0.7, encadenable: true, capa: 'GOLPE' });
     };
 
@@ -345,6 +407,230 @@ export function crearBiblioteca(deps) {
     golpe('atk_crouch', 'ATAQUE_LIGERO', { commitment: 0.55 });
     golpe('atk_air', 'ATAQUE_AEREO', { commitment: 0.6 });
     golpe('atk_sweep', 'BARRIDO', { commitment: 0.65 });
+
+    // -----------------------------------------------------------------------
+    // 5. LOS GOLPES POR FAMILIA
+    //
+    //   Los seis de arriba son el GOLPE BASE: el mismo para todos, y lo que
+    //   sale cuando no hay nada mas que decir. A partir de aqui estan las
+    //   SILUETAS, que son lo que hace que un jab y un gancho no se confundan.
+    //
+    //   Cada familia del tablero (`ClipBoard.FAMILIA`) tiene aqui su clip, y
+    //   todos se generan con `attackPose` pasando una clave REAL de
+    //   `FighterRig.ATTACK_KEYS`. Eso importa: `attackPose` cae a
+    //   `ATAQUE_LIGERO` cuando no reconoce la clave, y ese silencio convierte
+    //   "se me olvido esta clave" en "todos los golpes se ven igual", que es
+    //   justo el fallo que la matriz de siluetas vino a arreglar.
+    // -----------------------------------------------------------------------
+    golpe('st_recto', 'ATAQUE_LIGERO', { commitment: 0.5 });
+    golpe('st_jab_largo', 'JAB_LARGO', { commitment: 0.6 });
+    golpe('st_cruzado', 'CRUZADO', { commitment: 0.8 });
+    golpe('st_gancho', 'GANCHO', { commitment: 0.75 });
+    golpe('st_uppercut', 'UPPERCUT', { commitment: 0.85 });
+    golpe('st_patada_baja', 'ATAQUE_BARRIDO', { commitment: 0.65 });
+    golpe('st_patada_lateral', 'ATAQUE_PESADO', { commitment: 0.7 });
+    golpe('st_costillas', 'COSTILLAZO', { commitment: 0.5 });
+    golpe('sp_patada_frontal', 'PATADA_FRONTAL', { commitment: 0.8 });
+    golpe('sp_patada_giro', 'ATAQUE_PESADO', { commitment: 0.75 });
+    golpe('sp_botellazo', 'ATAQUE_ESPECIAL', { commitment: 0.85 });
+    golpe('sp_derribo', 'DERIBO', { commitment: 0.9 });
+    golpe('sp_embestida', 'EMBESTIDA', { commitment: 0.95 });
+    golpe('sp_sumision', 'SUMISION', { commitment: 0.9 });
+    golpe('sp_carga_alpine', 'PROYECCION', { commitment: 0.95 });
+    golpe('sp_pasa_pie_abajo', 'DERIBO', { commitment: 0.8 });
+
+    // -----------------------------------------------------------------------
+    // 6. LAS RECONCIONES
+    //
+    //   `hitstun`, `dizzy`... no son "golpes que recibe el cuerpo": son el
+    //   tiempo que el cuerpo pasa recovering, y cada uno tiene su lectura.
+    //
+    //   El generador delega en `FighterRig.flinchPose`, que ya sabe DONDE ha
+    //   pegado el golpe (por `opts.move`) y con que potencia: la matriz de
+    //   reacciones 3x3 (alto/medio/bajo x suave/fuerte) vive ahi, y duplicarla
+    //   aqui seria tener dos sitios distintos para lo mismo.
+    //
+    //   Lo que aporta este archivo es el RELOJ: el clip es el de un solo sentido
+    //   y su `t` es el progreso de la reaccion, que es lo que la matriz necesita
+    //   para volver a la guardia cuando toca.
+    // -----------------------------------------------------------------------
+    const reaccion = (nombre, hitLevel, dur, extra = {}) => {
+        registrar(nombre, dur, false, (rig, t, opts) => {
+            if (flinchPose) {
+                return flinchPose(rig, hitLevel, Object.assign({}, opts, {
+                    t: t,
+                    // El golpe que entro lo trae la entidad; sin el, la matriz
+                    // se deduce solo del nivel y se pierde la altura real.
+                    move: opts.move || null,
+                    breath: 0
+                }));
+            }
+            // Sin el generador del rig: un retroceso con la misma lectura (el
+            // torso se echa atras segun lo fuerte que sea), construido con la
+            // postura. Peor que la matriz, pero no es "no hay animacion".
+            const k = hitLevel === 'FUERTE' ? 1 : hitLevel === 'BAJO' ? 0.5 : 0.75;
+            const pico = Math.sin(Math.min(1, t) * Math.PI);
+            return stancePoseFn(rig, 'DEFENSIVE', Object.assign({}, opts, {
+                crouch: k * pico * 0.7, lean: -k * pico * 14, guard: 1 - k * pico * 0.6,
+                spread: 0.5 + k * pico * 0.2, breath: pico
+            }));
+        }, { continuo: false, commitment: extra.commitment != null ? extra.commitment : 0.4, capa: 'GOLPE' });
+    };
+
+    reaccion('hitstun', 'MEDIO', 0.32, { commitment: 0.35 });
+    reaccion('stagger', 'BAJO', 0.55, { commitment: 0.55 });
+    reaccion('dizzy', 'FUERTE', 1.10, { commitment: 0.7 });
+    reaccion('combo_breaker', 'FUERTE', 0.45, { commitment: 0.6 });
+
+    registrar('juggle', 0.80, false, (rig, t, opts) => {
+        // En el aire la reaccion no es una caida: es un deriva hacia el suelo
+        // con el cuerpo torcido. Sin `floatPose` (que es el generador del aire)
+        // se compone con la postura flotante.
+        const pico = Math.sin(Math.min(1, t) * Math.PI);
+        if (floatPose) {
+            const base = floatPose(rig, opts);
+            return base;
+        }
+        return stancePoseFn(rig, 'DEFENSIVE', Object.assign({}, opts, {
+            crouch: -0.2 * (1 - pico), lean: -pico * 20, guard: 0.2, spread: 0.7, breath: pico
+        }));
+    }, { continuo: false, commitment: 0.3 });
+
+    registrar('juggle_dead', 1.40, false, (rig, t, opts) => {
+        // Sin aire: no vuelve a la guardia por su cuenta. El cuerpo cae plano y
+        // se queda asi hasta que otro estado lo sacude. Por eso NO es un ciclo
+        // y por eso dura mas que el juggle normal.
+        const tt = Math.min(1, t);
+        const twist = Math.min(1, tt * 2.4) * (1 - Math.max(0, (tt - 0.6) / 0.4));
+        if (floatPose) return floatPose(rig, Object.assign({}, opts, { twist: twist }));
+        return stancePoseFn(rig, 'DEFENSIVE', Object.assign({}, opts, {
+            crouch: -0.35 * (1 - tt * 0.5), lean: -twist * 24, guard: 0, spread: 0.8, breath: 0
+        }));
+    }, { continuo: false, commitment: 0.1 });
+
+    // -----------------------------------------------------------------------
+    // 7. EL SUELO
+    //
+    //   `down_prone` / `down_supine` son la cara de la caida y `wakeup_*` la
+    //   levantada. Se generan con `downPose` y `wakeupPose`, que yaPONEN el
+    //   cuerpo en el suelo con la orientacion de la caida (la FSM guarda el eje
+    //   al derribar) y la desenrollan bien.
+    // -----------------------------------------------------------------------
+    registrar('down_prone', 1.20, true, (rig, t, opts) => {
+        if (downPose) return downPose(rig, opts.down || { orientation: 'CABEZA_A_RIVAL', axis: 0 }, opts);
+        const resp = Math.sin(t * Math.PI * 2) * 0.5 + 0.5;
+        return stancePoseFn(rig, 'DEFENSIVE', Object.assign({}, opts, { crouch: 2.4, guard: 0, breath: resp }));
+    }, { continuo: true, commitment: 0 });
+
+    registrar('down_supine', 1.20, true, (rig, t, opts) => {
+        if (downPose) return downPose(rig, opts.down || { orientation: 'PIES', axis: 180 }, opts);
+        const resp = Math.sin(t * Math.PI * 2) * 0.5 + 0.5;
+        return stancePoseFn(rig, 'DEFENSIVE', Object.assign({}, opts, { crouch: 2.4, guard: 0.1, breath: resp }));
+    }, { continuo: true, commitment: 0 });
+
+    registrar('wakeup_prone', 0.70, false, (rig, t, opts) => {
+        if (wakeupPose) return wakeupPose(rig, t, opts.down || { orientation: 'CABEZA_A_RIVAL', axis: 0 }, opts);
+        const sube = Math.min(1, t);
+        return stancePoseFn(rig, 'DEFENSIVE', Object.assign({}, opts, { crouch: 2.2 * (1 - sube), guard: 0.4 * sube, breath: sube }));
+    }, { continuo: false, commitment: 0.6 });
+
+    registrar('wakeup_crouch', 0.50, false, (rig, t, opts) => {
+        if (wakeupPose) return wakeupPose(rig, t, opts.down || { orientation: 'PIES', axis: 180 }, opts);
+        const sube = Math.min(1, t);
+        return stancePoseFn(rig, 'DEFENSIVE', Object.assign({}, opts, { crouch: 1.6 * (1 - sube), guard: 0.7 * sube, breath: sube }));
+    }, { continuo: false, commitment: 0.5 });
+
+    // -----------------------------------------------------------------------
+    // 8. LOS AGARRES
+    //
+    //   Treinta estados de agarre y NINGUN generador de agarre en el motor: el
+    //   `poseFor` los cacha en la ultima rama (la postura del catalogo) y todos
+    //   se ven igual. Aqui se generan desde la postura, y la diferencia entre
+    //   ellos son tres numeros: cuanto tira del cuerpo (`lean`), cuanto baja la
+    //   cadera (`crouch`) y como de abiertas estan las manos (`spread`).
+    //
+    //   El tiempo va con un ciclo de TRES tiempos (abrir, sostener, cerrar) porque
+    //   un agarre que solo "se mantiene" parece un tope con las manos, y un
+    //   agarre que solo se cierra parece que el rival se suelta solo.
+    // -----------------------------------------------------------------------
+    const agarre = (nombre, opt) => {
+        registrar(nombre, opt.dur || 0.9, true, (rig, t, opts) => {
+            const fase = t * 3 % 1;
+            // Triangular: sube, meseta, baja. La meseta es la parte que se ve
+            // larga, porque es donde el agarre esta de verdad.
+            const s = fase < 0.34 ? fase / 0.34 : fase < 0.62 ? 1 : 1 - (fase - 0.62) / 0.38;
+            const k = opt.pulso != null ? opt.pulso : s;
+            return stancePoseFn(rig, opt.stance || 'PRESSING', Object.assign({}, opts, {
+                crouch: (opt.crouch || 0) * (0.7 + k * 0.3),
+                lean: (opt.lean || 0) * (0.6 + k * 0.4),
+                spread: (opt.spread != null ? opt.spread : 0.5),
+                guard: opt.guard != null ? opt.guard : 0.5,
+                lead: opt.lead != null ? opt.lead : 0.1 * k,
+                breath: k
+            }));
+        }, { continuo: true, commitment: opt.commitment != null ? opt.commitment : 0.8, capa: 'GOLPE' });
+    };
+
+    // --- la entrada: coger al rival ---------------------------------------
+    agarre('rv_agarre_gancho', { crouch: 0.5, lean: 8, spread: 0.42, guard: 0.8, dur: 0.8 });
+    agarre('rv_clinch', { crouch: 0.6, lean: 10, spread: 0.40, guard: 0.9, dur: 0.9 });
+    agarre('rv_guardia_alta', { crouch: 0.3, lean: 4, spread: 0.38, guard: 1.0, dur: 1.0 });
+
+    // --- el mantenimiento: de pie, agachado y montado ----------------------
+    agarre('rv_agarre_pie', { crouch: 0.5, lean: 8, spread: 0.46, guard: 0.7 });
+    agarre('rv_agarre_agachado', { crouch: 1.4, lean: 12, spread: 0.52, guard: 0.7 });
+    agarre('rv_agarre_montado', { crouch: 1.6, lean: 14, spread: 0.50, guard: 0.6, stance: 'PRESSING' });
+    agarre('rv_presion', { crouch: 1.8, lean: 16, spread: 0.44, guard: 0.5 });
+    agarre('rv_atemi_uke', { crouch: 1.2, lean: -6, spread: 0.62, guard: 0.2, dur: 0.5, commitment: 0.5 });
+    agarre('rv_atemi_tori', { crouch: 1.3, lean: 12, spread: 0.50, guard: 0.6, dur: 0.5, commitment: 0.5 });
+
+    // --- las jugadas que acaban elAgarre ----------------------------------
+    agarre('rv_ukemi', { crouch: 1.0, lean: 8, spread: 0.56, guard: 0.4, dur: 0.7 });
+    agarre('rv_proyeccion', { crouch: 0.8, lean: -12, spread: 0.60, guard: 0.3, dur: 0.8 });
+    agarre('rv_sumision', { crouch: 0.9, lean: 6, spread: 0.48, guard: 0.5, dur: 1.0 });
+    agarre('rv_escape', { crouch: 0.6, lean: -8, spread: 0.58, guard: 0.6, dur: 0.7 });
+    agarre('rv_fin', { crouch: 0.7, lean: 4, spread: 0.50, guard: 0.6, dur: 0.9 });
+    agarre('rv_fin_de_juan', { crouch: 0.7, lean: 2, spread: 0.54, guard: 0.6, dur: 0.9 });
+
+    // --- el suelo: el de arriba y el de abajo ------------------------------
+    // Arriba y abajo tienen que verse OPUESTOS, no parecidos: si los dos se
+    // ven igual, el suelo no tiene dueñno y el castigo al del suelo pierde todo
+    // el sentido (la posicion deja de leerse y pasa a ser decoracion).
+    agarre('rv_top', { crouch: 2.4, lean: 20, spread: 0.44, guard: 0.7, dur: 1.0 });
+    agarre('rv_top_strike', { crouch: 2.2, lean: 24, spread: 0.40, guard: 0.6, dur: 0.6, commitment: 0.6 });
+    agarre('rv_top_escape', { crouch: 2.6, lean: 26, spread: 0.50, guard: 0.5, dur: 0.7 });
+    agarre('rv_top_ukemi', { crouch: 1.2, lean: -18, spread: 0.60, guard: 0.3, dur: 0.8 });
+    agarre('rv_bottom', { crouch: 2.8, lean: -14, spread: 0.66, guard: 0.15, dur: 1.0 });
+    agarre('rv_bottom_hit', { crouch: 2.8, lean: -18, spread: 0.70, guard: 0.1, dur: 0.6, commitment: 0.5 });
+    agarre('rv_bottom_escape', { crouch: 2.6, lean: -10, spread: 0.62, guard: 0.25, dur: 0.7 });
+    agarre('rv_bottom_ukemi', { crouch: 2.0, lean: -6, spread: 0.58, guard: 0.2, dur: 0.8 });
+
+    // -----------------------------------------------------------------------
+    // 9. LOS MOVIMIENTOS QUE FALTABAN DE LA LOCOMOCION
+    //
+    //   Los once de la tabla de `LOCO_TABLE` no cubren los tres estados que la
+    //   entidad anade por su cuenta (el dash agachado, el dash saltando y el
+    //   sprint hacia atras). Sin ellos, el tablero caia a `idle` mientras el
+    //   peleador corria de lado, que es el peor sitio posible para caerse a
+    //   reposo: el dash es el momento en que la camara esta mas cerca.
+    // -----------------------------------------------------------------------
+    registrar('sprint_b', 0.46, true, (rig, t, opts) => {
+        return locoPose(rig, LOCO.RUN, Object.assign({}, opts, {
+            style: 'IDLE', forward: -1, dist: 1.5, loco: LOCO.RUN
+        }));
+    }, { continuo: true, commitment: 0.75, cancellable: false });
+
+    registrar('couch_dash', 0.30, true, (rig, t, opts) => {
+        return locoPose(rig, 'CROUCH_DASH', Object.assign({}, opts, {
+            style: 'DEFENSIVE', forward: 1, dist: 1.2, loco: 'CROUCH_DASH'
+        }));
+    }, { continuo: true, commitment: 1.0, cancellable: false });
+
+    registrar('jump_dash', 0.32, true, (rig, t, opts) => {
+        return locoPose(rig, 'JUMP_DASH', Object.assign({}, opts, {
+            style: 'IDLE', forward: 1, dist: 1.2, loco: 'JUMP_DASH'
+        }));
+    }, { continuo: true, commitment: 1.0, cancellable: false });
 
     return Object.freeze(C);
 }
