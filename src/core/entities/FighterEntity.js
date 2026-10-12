@@ -230,6 +230,16 @@ export class FighterEntity {
         // mismo frame.
         this.clips = new ClipPlayer();
 
+        // El reproductor de clips GRABADOS (`render/ClipGrabber.js`). Cada
+        // peleador tiene el suyo porque la Pose de trabajo es suya: si dos
+        // peleadores compartieran el mismo objeto, `muestrear` escribiria en
+        // los dos el mismo frame y se verian la pose del otro.
+        //
+        // Puede ser null (los tests montan la entidad sin render y sin red), y
+        // entonces todo lo de abajo cae a la postura procedural, que es como
+        // funcionaba antes. Por eso no es obligatorio y por eso no se Avisa.
+        this.clipsGrabados = opts.clipsGrabados || null;
+
         if (!registeredCharacters.has(this.characterId)) {
             registerCharacterStances(this.characterId, defineState);
             registeredCharacters.add(this.characterId);
@@ -1148,7 +1158,29 @@ export class FighterEntity {
             state.tag === 'GUARDIA';
 
         let res;
-        if (!combat) {
+        // --- EL CLIP GRABADO GANA SI LO HAY ---------------------------------
+        //
+        // Aqui es donde por fin se conectan las animaciones reales. Antes se
+        // llamaba SIEMPRE a los generadores de postura, y la biblioteca de
+        // clips era una isla de datos: 26 generadores probados que el juego
+        // nunca preguntaba. Y el orden importa: se pregunta ANTES de generar
+        // la postura procedural, porque si se generase despues la postura
+        // (con su IK de manos y su plantado de pies) se escribiria encima del
+        // clip y lo dejaria en un fotograma.
+        const clip = resolverClip({
+            id: state.id,
+            groups: state.groups,
+            posture: state.posture,
+            loco: this.loco.state,
+            move: fsm.move ? fsm.move.key : null
+        }).clip;
+        const t = this.clips.avanzar(clip, dt, this._time);
+
+        const grabada = this.clipsGrabados ? this.clipsGrabados.pose(clip, t) : null;
+
+        if (grabada) {
+            res = { pose: grabada, state: null, grabada: true };
+        } else if (!combat) {
             res = FighterRig.locoPose(this.model.rig, this.loco.state, opts);
         } else {
             const snap = {
@@ -1194,14 +1226,8 @@ export class FighterEntity {
         // El reloj (`ClipPlayer`) es lo que da a los CICLOS su propio tiempo:
         // un ciclo de paso que se reanuda tiene que seguir por donde iba, no
         // volver al principio porque el estado devolvio el control.
-        const clip = resolverClip({
-            id: state.id,
-            groups: state.groups,
-            posture: state.posture,
-            loco: this.loco.state,
-            move: fsm.move ? fsm.move.key : null
-        }).clip;
-        this.clips.avanzar(clip, dt, this._time);
+        // El identificador de mezcla y el reloj se han resuelto ANTES, arriba:
+        // hacen falta los dos para preguntar por el clip grabado.
 
         // La duracion sale de los GRUPOS del estado destino, no del estado
         // concreto: hay treinta estados de agarre y todos entran igual.

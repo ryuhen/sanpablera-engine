@@ -206,7 +206,13 @@ export {
     resolver as clipDelEstado, familiaDe, clipDeGolpe, clipDeAgarre,
     sinClip as estadosSinClip, ORIGEN as ORIGEN_CLIP,
     FAMILIA as FAMILIA_DE_GOLPE, REPOSO as CLIP_REPOSO,
-    CLIP_DE_ESTADO, CLIP_DE_LOCO, CLIP_DE_FAMILIA, CLIP_DE_GOLPE, FAMILIA_DE_GOLPE
+    CLIP_DE_ESTADO, CLIP_DE_LOCO, CLIP_DE_FAMILIA, CLIP_DE_GOLPE
+    // OJO: `FAMILIA_DE_GOLPE` (la tabla de que familia es cada golpe) NO se
+    // reexporta por aqui. Antes estaba, y al lado estaba tambien
+    // `FAMILIA as FAMILIA_DE_GOLPE`, que es lo mismo con otro nombre: dos
+    // exportaciones del mismo nombre en un modulo es un SyntaxError y tumba la
+    // suite entera, no solo este export. Si hace falta en la fachada, sale de
+    // `core/anim/ClipBoard.js`.
 } from '../../core/anim/ClipBoard.js';
 export { ClipPlayer, mezclaDe as mezclaDeClip } from '../../core/anim/ClipPlayer.js';
 

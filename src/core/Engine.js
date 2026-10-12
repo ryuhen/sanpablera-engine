@@ -44,6 +44,8 @@ import LoadingScreen from '../ui/LoadingScreen.js';
 import SelectScreen from '../ui/SelectScreen.js';
 import StageSelect from '../ui/StageSelect.js';
 import { loadCharacterModel } from '../render/CharacterModel.js';
+import { ClipGrabber, ClipRunner } from '../render/ClipGrabber.js';
+import { createPose } from './cine/Pose.js';
 import { Cape } from '../render/ClothMesh.js';
 import { AnimInspector } from './anim/Inspector.js';
 import { InputMapper } from './entities/InputMapper.js';
@@ -59,6 +61,16 @@ const { Intent } = SPF;
 
 // Modelo del peleador. Se puede cambiar por ?modelo=<ruta> en la URL para
 // probar otro sin tocar el codigo (ver ASSETS.md).
+//
+// POR DEFECTO SIGUE SIENDO EL MANIQUI DE KHRONOS, y hay un motivo medido: los
+// clips de Quaternius (`assets/animations/quaternius/`) estan grabados sobre
+// otro esqueleto, pero el motor compone DELTAS y eso aguanta bien el cambio de
+// modelo: los 21 huesos resuelven y el cuerpo sale de pie andando. Lo que NO
+// aguanta es el MODELO de Quaternius, que sale scrambling (caderas en el aire y
+// los huesos por encima de la cabeza) por el giro de raiz que trae su archivo.
+// Ese es un fallo de eje preexistente del render, no de los clips, y se arregla
+// aparte. Ponerlo aqui de serie seria cambiar el aspecto del juego entero
+// para meter un bug que ya estaba.
 //
 // `?piezas=1` cuelga primitivas (capsulas y cajas) de los huesos del CONTRATO
 // encima del .glb. Es el "maniqui de piezas" (render/PartMannequin.js): sirve
@@ -612,6 +624,13 @@ function updateActionButton(input, dt) {
 // ARRANQUE
 // ===========================================================================
 
+// El almacen de clips grabados, para poder preguntar que hay y que falta sin
+// abrir la consola. `clips()` devuelve el resumen; `clipDe(nombre)` la pose.
+// Se declara ANTES de `boot` a proposito: `boot()` se llama mas abajo y en
+// versionar el `let` despues haria depender la carga de animaciones de si el
+// modulo llego o no a esa linea.
+let clipsGrabados = null;
+
 async function boot() {
     // La pantalla de carga llega a "Listo" y pide el gesto para empezar
     // (pantalla completa + fundido). Hasta aqui NO hay peleadores: todavia no
@@ -655,6 +674,26 @@ async function boot() {
         f.model.place(f.x, f.z, f.facing);
     }
 
+    // --- Las animaciones grabadas ------------------------------------------
+    //
+    // Van JUNTO a la carga del modelo y no despues, porque son los dos
+    // greetings del mismo asset: si se pidieran en dos momentos distintos, el
+    // segundo esperaria al primero y la pelea empezaria con un tirón.
+    //
+    // Y si NO se pueden traer, se sigue jugando: los clips son la mejora, no la
+    // condicion para que el ring exista. `grabber` se queda a null y todos los
+    // peleadores caen a la postura procedural, que es como se juega antes de
+    // que existieran.
+    const grabber = new ClipGrabber();
+    try {
+        const r = await grabber.cargarTodo();
+        console.log('Clips: ' + r.traidos + ' animaciones, ' + r.fallos + ' ausentes' +
+            (grabber.fallidos.length ? ' (' + grabber.fallidos.join('; ') + ')' : ''));
+    } catch (err) {
+        console.warn('No se pudieron traer las animaciones; se juega con las posturas.', err);
+    }
+    if (grabber && grabber.listo) clipsGrabados = grabber;
+
     // --- Entidades de combate (FSM + rig + locomocion) ---------------------
     // P2 es el RIVAL PASIVO: input congelado y postura de guardia. Se
     // levanta solo del suelo (la entidad inyecta la levantada) pero no
@@ -666,7 +705,13 @@ async function boot() {
             model: f.model,
             characterId: f.characterId || 'BASE',
             id: f.name,
-            stance: f.name === 'P2' ? 'RELAX' : 'SHELL'
+            stance: f.name === 'P2' ? 'RELAX' : 'SHELL',
+            // Su reproductor de clips. El `grabber` es el mismo para los dos
+            // (los archivos son los mismos y no se descargan dos veces), pero
+            // el `runner` y su Pose de trabajo son de cada uno: `muestrear`
+            // escribe dentro, y dos peleadores escribiendo en la misma Pose se
+            // verian la pose del otro el mismo frame.
+            clipsGrabados: grabber ? new ClipRunner(grabber, createPose()) : null
         });
 
         // --- LA CAPA (tela) ---------------------------------------------
@@ -1080,6 +1125,14 @@ window.SANPABLERA = { engine, scene, camera, fighters, entities, world, inputMap
 // final de boot):
 window.SANPABLERA.getInspector = () => inspector;
 window.SANPABLERA.getRouter = () => (ui ? ui.router : null);
+
+// El almacen de clips grabados, para poder preguntar que hay y que falta sin
+// abrir la consola. `clips()` devuelve el resumen; `clipDe(nombre)` la pose.
+window.SANPABLERA.clips = () => (clipsGrabados ? clipsGrabados.info() : null);
+window.SANPABLERA.clipDe = (nombre) => {
+    const e = entities && entities[0];
+    return e && e.clipsGrabados ? e.clipsGrabados.pose(nombre, 0) : null;
+};
 
 /** Abre o cierra el inspector de animaciones (atajo a la tecla F2). */
 window.SANPABLERA.anim = function () {
