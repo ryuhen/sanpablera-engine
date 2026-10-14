@@ -411,6 +411,193 @@ export function blendReactionOverStance(rig, stancePoseResult, hit) {
 }
 
 // ===========================================================================
+// EL IMPACTO REAL: DONDE Y DE QUE LADO HA PEGADO
+// ===========================================================================
+
+/**
+ * Que lado del cuerpo ha recibido el golpe, y a que altura de verdad.
+ *
+ * POR QUE HACE FALTA, Y NO ES COSA DE ESTILO
+ *   `heightOf` y `powerOf` leen lo que el golpe **declara que es**: un jab dice
+ *   "golpe alto", y da igual que a este peleador le haya dado en el muslo. Eso
+ *   produce el efecto contrario del que se quiere: el mismo jab da la misma
+ *   reaccion a todo el mundo, y el jugador no ve por que le ha dolido mas.
+ *
+ *   Aqui se lee el CONTACTO, que es lo que de verdad ha pasado: en que punto y
+ *   de que direccion. De ahi salen tres cosas que la matriz no tiene:
+ *
+ *     - el LADO: un jab de derecha y uno de izquierda tienen que echar la
+ *       cabeza a lados opuestos, y con la tabla salen iguales.
+ *     - la ALTURA REAL: un golpe declarado ALTO que cae en la rodilla es un
+ *       golpe BAJO, y el cuerpo tiene que reaccionar como BAJO.
+ *     - la INCLINACION: el impacto no viene de frente siempre, y la torsión
+ *       depende de de donde venga.
+ *
+ * CONVENCION
+ *   `contacto.punto` es un punto en METROS, en espacio de personaje del que
+ *   recibe (Y arriba, Z adelante, origen bajo la pelvis), que es donde ya viven
+ *   los objetivos de mano. `contacto.dir` es la DIRECCION en la que viaja el
+ *   golpe (hacia donde va, no desde donde viene): si el jab entra por la
+ *   izquierda, `dir.x` es positivo. Trabajar con la direccion de viaje y no con
+ *   la normal de la superficie evita tener que preguntar de que lado esta el
+ *   rival, que en un clinch no esta claro.
+ *
+ * @param {object} [contacto] { punto:[x,y,z], dir:[x,y,z] }
+ * @param {object} [opts]     { alturaCuerpo } (por defecto 1.80)
+ * @returns {{lado:number, altura:number, torque:number}|null}
+ */
+export function contactoDe(contacto, opts = {}) {
+    if (!contacto || !contacto.punto) return null;
+    const p = contacto.punto;
+    if (!Array.isArray(p) || p.length < 2) return null;
+
+    // Lado: positivo = le ha dado por su derecha. Es la componente lateral del
+    // punto de contacto, no la del vector, porque lo que mira el jugador es
+    // DONDE le ha dado, no de donde venia.
+    const dir = Array.isArray(contacto.dir) ? contacto.dir : null;
+    let lado = dir && dir.length >= 3 ? dir[0] : p[0];
+
+    // Altura real, normalizada a la estatura. Los umbrales no son arbitrarios:
+    // son las tres filas de la matriz (ALTO / MEDIO / BAJO) mas un peldaño por
+    // debajo para el suelo, que es donde van los barridos y los castigos.
+    const cuerpo = opts.alturaCuerpo || 1.80;
+    const f = p[1] / cuerpo;
+    const bruto = dir && dir.length >= 3 ? dir[0] * 0.75 + (dir[2] || 0) * 0.25 : 0;
+
+    // TODO lo que sale de aqui entra en rotaciones de huesos, y un NaN en una
+    // rotacion NO lanza nada: se propaga por la FK y deja el esqueleto entero en
+    // NaN, con el peleador invisible y la consola limpia. Por eso se acota TODO,
+    // no solo lo que se ha pensado: la altura se quedaba sin acotar y un
+    // contacto con la Y a NaN pasaba de largo. Los tres caen a un valor neutro.
+    const acotar = (v, alt) => (isFinite(v) ? Math.max(-1, Math.min(1, v)) : alt);
+
+    return {
+        lado: acotar(lado, 0),
+        altura: isFinite(f) ? Math.max(0, Math.min(1, f)) : 0.5,
+        torque: acotar(bruto, 0)
+    };
+}
+
+/**
+ * La misma reaccion, pero GIRADA hacia donde de verdad ha pegado.
+ *
+ * POR QUE ES ADITIVA Y NO UN CAMBIO DE `hitReactionPose`
+ *   Sin `opts.contacto` esta funcion devuelve exactamente lo que devolvia
+ *   antes. Eso no es pereza: es lo que permite meterla sin romper las 40
+ *   pruebas que ya hay, y sobre todo lo que hace que el motor pueda llamarla
+ *   siempre y que solo cambie el aspecto cuando de verdad hay informacion de
+ *   impacto. Un sistema de reacciones nuevo, con tabla nueva, seria mas
+ *   bonito y habria que re-verificar todo lo viejo.
+ *
+ * QUE TOCA Y POR QUE
+ *   - La CABEZA gira al lado contrario del golpe y se echa atras. Es lo primero
+ *     que ve el jugador y lo que mas lee: un jab de derecha echa la cabeza a
+ *     la izquierda, nunca al revés (si echas la cabeza HACIA el golpe parece
+ *     que lo has esquivado).
+ *   - El TORSO torsiona un poco hacia el golpe, la mitad de la cabeza. Menos
+ *     que la cabeza porque si no giran los dos como un bloque y parece una
+ *     puerta.
+ *   - La CADERA se desplaza hacia atras en la altura real del contacto, que no
+ *     es la declarada: un golpe ALTO que cae abajo hunde la cadera.
+ *
+ * @param {object} rig
+ * @param {object} move    el golpe recibido
+ * @param {number} t       0..1 dentro del hitstun
+ * @param {object} [opts]  { contacto, alturaCuerpo, gain }
+ * @returns {{pose, state, reaction, height, power, contacto}}
+ */
+export function hitReactionFromContact(rig, move, t, opts = {}) {
+    const base = hitReactionPose(rig, move, t, opts);
+    const c = contactoDe(opts.contacto, opts);
+    if (!c) return base;
+
+    const tt = clamp01(t);
+    // La misma envolvente que usa la reaccion base: entra rapido y vuelve con
+    // el `recover` de la fila. Si aqui se usara otra, la direccion se quedaria
+    // colgada despues de que el cuerpo ya ha vuelto a la guardia.
+    const R = base.reaction;
+    const hit = ease('EASE_OUT', clamp01(tt / 0.22));
+    const back = ease('EASE_IN_OUT', clamp01((tt - 0.35) / Math.max(0.05, 1 - 0.35)));
+    const w = clamp01(lerp(hit, 1 - (R ? R.recover : 0.6), back));
+
+    const pose = base.pose;
+
+    // Cuanto manda la direccion sobre la tabla. `gain` a 0 deja el
+    // comportamiento anterior intacto, que es lo que permite desactivar la
+    // funcion sin tocar el codigo.
+    const gain = opts.gain === undefined ? 0.55 : opts.gain;
+
+    // -----------------------------------------------------------------------
+    // LA TRAMPA DE AQUI, Y POR QUE ESTA ES LA FORMA BUENA
+    // -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // LA TRAMPA DE AQUI: POR QUE NO SE SUMA, SE REESCRIBE
+    // -----------------------------------------------------------------------
+    // `pose.rot[hueso]` es un QUATERNION [x,y,z,w] y `setEuler` **SUSTITUYE**
+    // el giro, no lo suma. La primera version hacia
+    // `setEuler(pose,'SPINE', sp[0], sp[1]+yaw, sp[2]+roll)` leyendo `sp` de la
+    // pose: pasaba componentes de quaternion como si fueran angulos y de paso
+    // pisaba el giro de la tabla. Es un fallo SILENCIOSO: no lanza nada y sale
+    // un torso rarisimo. La segunda version sumo un delta con `addPose`, que
+    // ya esta bien, pero NO FUNCIONABA: la tabla trae un yaw fijo por fila (por
+    // ejemplo -0,20) que es mas fuerte que el giro direccional, asi que un
+    // jab por la derecha y otro por la izquierda acababan los dos hacia el
+    // mismo lado. Sumar no vale.
+    //
+    // LA IDEA: sobre el EJE LATERAL manda el CONTACTO, no la tabla.
+    //   - el CONTACTO dice hacia que lado (que es lo que el jugador ve).
+    //   - la TABLA dice cuanto (que depende de la potencia del golpe).
+    // Asi que se toma el VALOR ABSOLUTO del yaw de la tabla -la cantidad- y se
+    // le pone el SIGNO y la DIRECCION del contacto. Asi la potencia sigue
+    // mandando en cuanto, y el golpe manda en hacia donde.
+    //
+    // Y como se reescribe el euler entero, `setEuler` vuelve a ser lo correcto
+    // aqui: se le pasan los tres angulos, no media quaternion.
+    const [sp, sy, sr] = R.spine;
+    const [hp, hy] = R.head;
+
+    const yawTorso = lerp(sy, c.torque * (Math.abs(sy) + 0.25), gain) * w;
+    const yawCuello = lerp(hy, -c.lado * (Math.abs(hy) + 0.30), gain) * w;
+    // El ALABEO (roll) es el segundo eje lateral, y le pasa lo mismo que al yaw:
+    // la tabla trae +0,22 fijo, y si se le suma el lado del impacto ese fijo
+    // gana para un lado y no para el otro, y los dos golpes acaban inclinados
+    // hacia el mismo. Misma regla: la tabla pone el cuanto, el contacto el
+    // hacia donde. Al reves (hacia el golpe) parece que se haesquivadoado.
+    const rollTorso = lerp(sr, -c.lado * (Math.abs(sr) + 0.18), gain) * w;
+
+    setEuler(pose, 'SPINE', sp * w, yawTorso, rollTorso);
+    setEuler(pose, 'CHEST', sp * 0.5 * w, yawTorso * 0.7, rollTorso * 0.5);
+    // El cuello va en espejo del torso (ya lo documenta la tabla) y llega mas
+    // lejos, porque es lo primero que lee el jugador.
+    setEuler(pose, 'NECK', -hp * w, yawCuello, -c.lado * 0.22 * w * gain);
+    setEuler(pose, 'HEAD', -hp * 0.45 * w, yawCuello * 0.6, -c.lado * 0.12 * w * gain);
+
+    // Cadera: corrige la ALTURA REAL contra la declarada. Un golpe que el
+    // motor declara ALTO pero que cae en la rodilla tiene que hundir la
+    // cadera, y la tabla no puede saberlo: solo ve el golpe.
+    // El signo va asi: por encima de la cintura levanta un poco, por debajo
+    // hunde. Al reves el cuerpo haria justo lo contrario, y eso fue el primer
+    // fallo que salio al medir.
+    const desvio = clamp((c.altura - 0.50) * 2.2, -1, 1);
+    const cur = pose.pos.PELVIS || [0, 0, 0];
+    setPos(pose, 'PELVIS', [cur[0], cur[1] + desvio * 0.09 * w, cur[2]]);
+
+    return {
+        pose,
+        state: fk(rig, pose, base.state),
+        reaction: R,
+        height: base.height,
+        power: base.power,
+        contacto: c
+    };
+}
+
+/** `clamp` local: `Math3` no exporta uno con dos limites y signo. */
+function clamp(v, lo, hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// ===========================================================================
 // LOS GOLPES EN EL SUELO
 // ===========================================================================
 
