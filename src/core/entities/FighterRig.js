@@ -75,6 +75,90 @@ const LIMB_SPECS = Object.freeze({
     FLOAT:   Object.freeze({ spread: 0.40, lead: 0.08, lean: 4,  guard: 0.35, crouch: 0.150 })
 });
 
+/**
+ * Los agarres que ocurren EN EL SUELO, y como se ven.
+ *
+ * POR QUE UNA TABLA Y NO LEER EL ESTADO
+ *   El papel (uke / tori) y la postura SIEMPRE estan declarados en el estado,
+ *   y de ahi sale la fila sin depender de los grupos: los dos cuerpos estan en
+ *   GRAPPLE a la vez y los grupos no distinguen quien esta arriba.
+ *
+ * Y el reparto de `orientation` es el que da la lectura a un vistazo: el de
+ * arriba esta ENCIMA y va boca abajo; el de abajo esta DEBAJO y va boca
+ * arriba. Sin esa diferencia los dos seria el mismo bulto tumbado.
+ *
+ * El `axis` es el giro alrededor del eje vertical: los dos cuerpos del agarre
+ * estan tumbados en cruz, asi que el de abajo mira hacia donde mira el de
+ * arriba mas 180 grados.
+ */
+export const SUELO_DE_AGARRE = Object.freeze({
+    // --- el de ABAJO: boca arriba, debajo del rival ------------------------
+    BOTTOM: Object.freeze({ orientation: 'CABEZA_A_RIVAL', axis: 0 }),
+    BOTTOM_HIT: Object.freeze({ orientation: 'CABEZA_A_RIVAL', axis: 0 }),
+    BOTTOM_ESCAPE: Object.freeze({ orientation: 'CABEZA_A_RIVAL', axis: 0 }),
+    BOTTOM_UKEMI: Object.freeze({ orientation: 'CABEZA_A_RIVAL', axis: 0 }),
+
+    // --- el de ARRIBA: boca abajo, encima del rival ------------------------
+    TOP: Object.freeze({ orientation: 'PIES_A_RIVAL', axis: 0 }),
+    TOP_CROUCH: Object.freeze({ orientation: 'PIES_A_RIVAL', axis: 0 }),
+    TOP_STRIKE: Object.freeze({ orientation: 'PIES_A_RIVAL', axis: 0 }),
+    TOP_ESCAPE: Object.freeze({ orientation: 'PIES_A_RIVAL', axis: 0 }),
+    TOP_UKEMI: Object.freeze({ orientation: 'PIES_A_RIVAL', axis: 0 })
+});
+
+/**
+ * El dato de suelo de un agarre tumbado, o `null` si no lo es.
+ *
+ * @param {string} limbs `limbs` del estado
+ * @returns {object|null} lo que entiende `downPose`
+ */
+export function posturaDeSueloDeAgarre(limbs) {
+    if (!limbs) return null;
+    return SUELO_DE_AGARRE[limbs] || null;
+}
+
+/** Los nombres de `limbs` que son un agarre tumbado. */
+export function esAgarreDeSuelo(limbs) {
+    return !!posturaDeSueloDeAgarre(limbs);
+}
+
+/**
+ * Una postura que existe, o STAND avisando UNA VEZ POR NOMBRE.
+ *
+ * POR QUE AVISA Y NO SOLO DEVUELVE STAND
+ *   Antes la linea era `LIMB_SPECS[p.limbs] ? p.limbs : 'STAND'`, y el fallo
+ *   de esa forma es que era TOTALMENTE MUDO: ni error, ni aviso, ni una linea
+ *   en consola. Una postura que no existe se convertia en un peleador de pie
+ *   y no habia manera de enterarse salvo contando estados a ojo: por ahi se
+ *   colaron 24 de los 71 estados de pie, y nadie se entero hasta que se hizo
+ *   `posturas.smoke.mjs`.
+ *
+ *   El aviso va **una vez por nombre**, no uno por frame: si no, un estado con
+ *   la postura mala llenaria la consola de 60 líneas por segundo y taparía
+ *   todo lo demás, que es exactamente lo que un buen aviso no debe hacer.
+ *
+ * @param {string} limbs `limbs` del estado
+ * @returns {string} un nombre que SI está en `LIMB_SPECS`
+ */
+const _posturasAvisadas = new Set();
+function posturaConocida(limbs) {
+    if (limbs && LIMB_SPECS[limbs]) return limbs;
+    if (limbs && !_posturasAvisadas.has(limbs)) {
+        _posturasAvisadas.add(limbs);
+        if (typeof console !== 'undefined' && console.warn) {
+            console.warn('FighterRig: la postura "' + limbs + '" no existe; se usa STAND. ' +
+                'Añádela a LIMB_SPECS (core/entities/FighterRig.js) o quita el fallo de ' +
+                'posturas.smoke.mjs, que la lista.');
+        }
+    }
+    return 'STAND';
+}
+
+/** Las posturas pedidas que NO existen todavia. Para el HUD y los tests. */
+export function posturasDesconocidas() {
+    return [..._posturasAvisadas];
+}
+
 /** Brazos en guardia segun la altura de guardia [L, R] ([fwd, up, open]). */
 function handsFor(guard) {
     const fwd = 0.10 + guard * 0.12;
@@ -186,7 +270,7 @@ const STANCE_ARMS = Object.freeze({
  */
 export function posturePose(rig, posture, opts = {}) {
     const p = posture || {};
-    const limbs = LIMB_SPECS[p.limbs] ? p.limbs : 'STAND';
+    const limbs = posturaConocida(p.limbs);
     const base = LIMB_SPECS[limbs];
     const mod = STYLE_MODS[opts.style] || STYLE_MODS.IDLE;
 
@@ -736,6 +820,23 @@ export function poseFor(rig, snap, opts = {}) {
     if (snap.phase === 'DOWNED' || groups.indexOf('DOWNED') !== -1) {
         return downPose(rig, snap.down, opts);
     }
+
+    // --- 3b. agarres EN EL SUELO ---------------------------------------
+    //
+    // POR QUE ESTA RAMA Y NO UNA POSTURA MAS
+    //   Los agarres tumbados NO son "una postura mas": son un cuerpo en el
+    //   suelo. Y el motor YA sabe hacer eso, que es `downPose`: la misma que
+    //   se ve al tumbarse, con la diferencia real entre los dos papeles:
+    //
+    //     - el de ARRIBA va boca ABAJO encima del rival (`prone`)
+    //     - el de ABAJO va boca ARRIBA debajo (`supine`)
+    //
+    //   Sin esta rama, un estado de agarre de suelo caia en `posturePose`, su
+    //   `limbs` no estaba en `LIMB_SPECS` y salia STAND: el de abajo se
+    //   levantaba y andaba por el ring con el otro tumbado al lado. Es el peor
+    //   fallo visual del motor y cabe en estas doce lineas.
+    const sueloDeAgarre = posturaDeSueloDeAgarre(snap.posture && snap.posture.limbs);
+    if (sueloDeAgarre) return downPose(rig, sueloDeAgarre, opts);
 
     // --- 4. levantada --------------------------------------------------
     // El estado WAKEUP no lleva DOWNED, asi que sin esta rama el peleador se
