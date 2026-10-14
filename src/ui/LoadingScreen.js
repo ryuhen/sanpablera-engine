@@ -197,17 +197,38 @@ function layoutFor(canvas) {
  * Cromos del grafiti. Se centralizan para poder cambiar el rollo del juego
  * (colores) sin tocar la logica del relleno.
  */
+/**
+ * Paleta de la pantalla de carga, en clave STREET FIGHTER II.
+ *
+ * POR QUE ESTA PALETA Y NO LA DE ANTES
+ *   Antes era una pared de cemento con manchas de humedad: gris frio, monocromo
+ *   y "manga". SFII no es eso. Su pantalla es azul profundo con bandas
+ *   horizontales, tipografia en oro con el contorno rojo oscuro del logo, y un
+ *   HUD de una sola tinta brillante sobre fondo casi negro. Lo que hace que se
+ *   reconozca no es un detalle suelto: es el azul, el oro y el contorno gordo,
+ *   los tres a la vez.
+ *
+ *   - El AZUL es el fondo de las batallas de SF. Oscuro, casi negro en los
+ *     bordes, para que el texto dorado destaque.
+ *   - El ORO con la sombra roja es como esta pintado el logo: relleno claro
+ *     arriba, dorado en el centro, rojo oscuro debajo, y contorno de 3 px.
+ *   - El ROJO solo se usa para el boton y el goteo, que es donde la pantalla
+ *     "grita" (lo equivalente al credit roll y al letrero de INSERT COIN).
+ *
+ * No se copia ningun recurso del juego: son colores y tipografia.
+ */
 const PALETTE = {
-    wall: '#15151a',
-    wallLight: '#2a2a33',
-    outline: '#08080b',
-    ink: '#f4f1e8',
-    hud: '#ffd23f',
-    accent: '#00e5ff',
-    // Desfasados de la aberracion cromatica (estilo CHROME).
-    chromaA: '#00e5ff',
+    wall: '#03071c',
+    wallLight: '#123a9e',
+    outline: '#5b1000',
+    ink: '#f5f7ff',
+    hud: '#ffc72c',
+    accent: '#2f6bff',
+    // Desfasados de la aberracion cromatica: el logo de SF lleva un cyan y un
+    // magenta apagados detras del dorado, y aqui tambien.
+    chromaA: '#2fd2ff',
     chromaB: '#ff2d95',
-    drips: '#ff2d6f'
+    drips: '#ff3b30'
 };
 
 /**
@@ -228,11 +249,11 @@ const CSS = `
     padding: env(safe-area-inset-top) env(safe-area-inset-right)
              env(safe-area-inset-bottom) env(safe-area-inset-left);
     background:
-        radial-gradient(120% 80% at 50% 12%, ${PALETTE.wallLight} 0%, ${PALETTE.wall} 70%),
+        radial-gradient(120% 80% at 50% 8%, ${PALETTE.wallLight} 0%, ${PALETTE.wall} 72%),
         ${PALETTE.wall};
     color: ${PALETTE.ink};
-    font-family: 'Bangers', 'Permanent Marker', 'Impact', 'Haettenschweiler',
-                 'Arial Black', system-ui, sans-serif;
+    font-family: 'Arial Black', 'Helvetica Neue', Impact, 'Haettenschweiler',
+                 system-ui, sans-serif;
     overflow: hidden;
     touch-action: none;
     -webkit-user-select: none;
@@ -247,19 +268,26 @@ const CSS = `
     pointer-events: none;
 }
 
-/* --- LA PARED: cemento, manchas de humedad y puntos de semitono ------------ */
-/* Sin imagenes: el textureado sale de gradientes y de un patron SVG. Es lo que
-   separa "diseño" de "rect de color plano" sin descargar ni un byte. */
+/* --- EL FONDO: bandas horizontales y lineas de barrido -------------------- */
+/* Antes era una pared de cemento. SFII tiene un fondo de bandas: rayas
+   horizontales grandes de azul, mas finas alternando, con lineas de barrido
+   encima porque es una recreativa de tubo. Sin imagenes: sale de gradientes,
+   que es lo que separa "diseño" de "rect de color plano" sin descargar un byte. */
 #sanpablera-loading .spl-wall {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    opacity: .55;
+    opacity: .95;
     background:
-        radial-gradient(90% 60% at 22% 18%, rgba(255,255,255,.06) 0%, transparent 60%),
-        radial-gradient(70% 50% at 82% 78%, rgba(0,0,0,.45) 0%, transparent 65%),
+        linear-gradient(180deg,
+            rgba(255,255,255,.10) 0 2px, transparent 2px 9px,
+            rgba(0,0,0,.22) 9px 11px, transparent 11px 26px),
         repeating-linear-gradient(0deg,
-            rgba(255,255,255,.035) 0 1px, transparent 1px 3px);
+            rgba(47,107,255,.10) 0 22%, transparent 22% 44%),
+        radial-gradient(90% 55% at 22% 14%, rgba(90,150,255,.30) 0%, transparent 62%),
+        radial-gradient(70% 50% at 84% 82%, rgba(0,0,0,.55) 0%, transparent 68%),
+        linear-gradient(115deg, transparent 0 44%,
+            rgba(255,255,255,.05) 44% 56%, transparent 56% 100%);
 }
 #sanpablera-loading .spl-halftone {
     position: absolute;
@@ -306,14 +334,15 @@ const CSS = `
 #sanpablera-loading .spl-decor   { opacity: .92; }
 
 /* --- HUD ----------------------------------------------------------------- */
-/* BARRA DE PROGRESO: se usa la misma pintura que el muro. */
+/* BARRA DE PROGRESO. En SFII los medidores son barras finas de tinta sobre
+   negro, con el marco marcado y nada de degradado: se leen de un vistazo. */
 #sanpablera-loading .spl-meter {
     position: relative;
     width: min(86vw, 620px);
-    height: 20px;
+    height: 16px;
     border: 3px solid ${PALETTE.ink};
-    border-radius: 2px;
-    background: rgba(0,0,0,.55);
+    border-radius: 0;
+    background: #000;
     overflow: hidden;
     transform: skewX(-12deg);
     box-shadow: 4px 4px 0 ${PALETTE.outline};
@@ -322,7 +351,7 @@ const CSS = `
     display: block;
     height: 100%;
     width: 0%;
-    background: linear-gradient(90deg, ${PALETTE.drips}, ${PALETTE.hud} 70%, #fff3b0);
+    background: linear-gradient(90deg, ${PALETTE.hud}, #fff3b0 60%, #fff);
     transition: width .18s linear;
 }
 
@@ -330,47 +359,53 @@ const CSS = `
     display: flex;
     align-items: baseline;
     gap: 12px;
-    font-family: 'Courier New', ui-monospace, monospace;
+    font-family: 'Arial Black', Impact, system-ui, sans-serif;
     font-size: clamp(12px, 2.6vw, 16px);
     letter-spacing: 2px;
     text-transform: uppercase;
     opacity: .95;
-    text-shadow: 2px 2px 0 ${PALETTE.outline};
+    text-shadow: 2px 2px 0 #001038;
 }
 #sanpablera-loading .spl-pct { min-width: 4ch; text-align: right; color: ${PALETTE.hud}; }
-#sanpablera-loading .spl-label { min-width: 22ch; }
+#sanpablera-loading .spl-label { min-width: 22ch; color: #9db9ff; }
 
-/* BOTON DE ARRANQUE: el gesto que pide la pantalla completa. */
+/* BOTON DE ARRANQUE: el gesto que pide la pantalla completa. En SFII el boton
+   que invita a seguir es ROJO con el texto blanco y el contorno negro, y late.
+   Aqui se hace igual, pero con el contorno rojo oscuro de la paleta. */
 #sanpablera-loading .spl-start {
     appearance: none;
-    border: 4px solid ${PALETTE.ink};
-    border-radius: 4px;
+    border: 4px solid ${PALETTE.outline};
+    border-radius: 0;
     padding: clamp(12px, 2.4vh, 20px) clamp(22px, 5vw, 44px);
-    background: ${PALETTE.hud};
-    color: ${PALETTE.outline};
+    background: linear-gradient(180deg, #ff6b60 0%, ${PALETTE.drips} 48%, #b81f16 100%);
+    color: #fff;
     font: inherit;
+    font-style: italic;
     font-size: clamp(18px, 4.6vw, 30px);
     letter-spacing: 2px;
     text-transform: uppercase;
+    text-shadow: 3px 3px 0 ${PALETTE.outline};
     transform: skewX(-8deg);
     cursor: pointer;
     touch-action: manipulation;
     box-shadow: 6px 6px 0 ${PALETTE.outline};
     animation: splPulse 1.5s ease-in-out infinite;
 }
-#sanpablera-loading .spl-start:focus-visible { outline: 4px dashed ${PALETTE.ink}; outline-offset: 6px; }
+#sanpablera-loading .spl-start:focus-visible { outline: 4px dashed #fff; outline-offset: 6px; }
 @keyframes splPulse {
-    0%, 100% { transform: skewX(-8deg) scale(1); }
-    50%      { transform: skewX(-8deg) scale(1.05); }
+    0%, 100% { transform: skewX(-8deg) scale(1); filter: brightness(1); }
+    50%      { transform: skewX(-8deg) scale(1.05); filter: brightness(1.35); }
 }
 #sanpablera-loading .spl-hint {
     max-width: 34ch;
     margin: 0;
     text-align: center;
-    font-family: 'Courier New', ui-monospace, monospace;
+    font-family: 'Arial Black', Impact, system-ui, sans-serif;
     font-size: clamp(11px, 2.4vw, 14px);
+    letter-spacing: 1px;
     line-height: 1.4;
-    opacity: .72;
+    color: #9db9ff;
+    opacity: .9;
 }
 
 /* MOVIL: la pantalla es pequena y el pulgar tapa el centro, asi que el muro

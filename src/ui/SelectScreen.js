@@ -23,34 +23,63 @@
 import { ROSTER, fullRoster } from '../core/roster.js';
 import { renameCustomFighter } from '../core/CustomFighter.js';
 
-const COLS = 4;
+// ===========================================================================
+// ESTILO STREET FIGHTER II
+// ---------------------------------------------------------------------------
+// LO QUE SE HA COPIADO Y POR QUE, que es lo que hace que "parezca" de SFII y
+// no sea solo "una rejilla con otros colores":
+//
+//   1. RETRATO EN MARCO, NO HEXAGONO. SFII no usa exagonos: son recuadros con
+//      marco biselado y la foto dentro. Aqui tampoco hay fotos, asi que el
+//      retrato es el color del peleador con sus iniciales, que es lo que
+//      comunica "quien es" sin un asset que aqui no existe.
+//   2. REJILLA DE 3. La de SFII es 3x3 y son nueve peleadores; aqui son nueve.
+//      Ademas el titulo y el nombre abajo Obligation la misma lectura.
+//   3. CARTEL DE NOMBRE ABAJO, en grande. Es el rasgo mas reconocible: el
+//      nombre del que esta enfocado, escrito en mouldura, cambia al mover.
+//   4. ROTULOS 1P / 2P en rojo y azul, como los marcadores del mando.
+//   5. FONDO A BANDAS con lineas de barrido. SFII es de lectura y arcade: el
+//      fondo no es liso, tiene bandas horizontales y un velo de scanlines.
+//   6. ORO CON CONTORNO GRUESO en el titulo y el boton, que es como esta
+//      dibujado el logo.
+//
+// NO se copia nada de Street Fighter: es la forma de la pantalla, no sus
+// personajes ni sus logotipos.
+// ===========================================================================
+const COLS = 3;
 
 const SELECT_CSS = `\
-.spf-select{position:fixed;inset:0;z-index:90;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:clamp(12px,3vh,26px);background:radial-gradient(1200px 700px at 50% 20%,#232837 0%,#0d1017 70%);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#e8e8ee;user-select:none;padding:20px;overflow:hidden}\
-.spf-select::before{content:'';position:absolute;inset:0;opacity:.35;background-image:linear-gradient(30deg,#ffffff10 12%,transparent 12.5%,transparent 87%,#ffffff10 87.5%),linear-gradient(150deg,#ffffff10 12%,transparent 12.5%,transparent 87%,#ffffff10 87.5%);background-size:46px 80px}\
-.spf-select-title{font-size:clamp(16px,4vh,26px);letter-spacing:6px;font-weight:800;color:#f4f4f8;text-shadow:0 2px 0 rgba(0,0,0,.6)}\
-.spf-select-subtitle{font-size:clamp(10px,2.2vh,13px);letter-spacing:3px;color:#8c93ad;text-transform:uppercase}\
-.spf-select-grid{display:grid;grid-template-columns:repeat(4,clamp(84px,17vw,140px));gap:clamp(6px,1.6vh,12px) clamp(8px,1.2vw,16px)}\
-.spf-select-cell{display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;background:none;border:none;padding:0;color:inherit;font-family:inherit}\
-.spf-select-hex{width:100%;aspect-ratio:1/0.98;clip-path:polygon(25% 0%,75% 0%,100% 50%,75% 100%,25% 100%,0% 50%);position:relative;overflow:hidden;transition:transform .08s linear;border:none}\
-.spf-select-hex::before{content:'';position:absolute;inset:0;background:linear-gradient(145deg,var(--hex) 0%,#14171f 130%);box-shadow:inset 0 0 0 2px rgba(255,255,255,.18)}\
-.spf-select-hex::after{content:'';position:absolute;inset:8% 14%;background:linear-gradient(145deg,rgba(255,255,255,.32),rgba(255,255,255,.02));clip-path:polygon(25% 0%,75% 0%,100% 50%,75% 100%,25% 100%,0% 50%);opacity:.5}\
-.spf-select-cell:hover .spf-select-hex{transform:scale(1.06)}\
-.spf-select-cell:focus-visible .spf-select-hex{outline:3px solid #fff;outline-offset:2px}\
-.spf-select-name{font-size:clamp(10px,2vw,13px);font-weight:700;letter-spacing:1px}\
-.spf-select-tag{font-size:clamp(8px,1.6vh,10px);color:#8c93ad;letter-spacing:.5px;text-align:center}\
-.spf-select-hex.pick1{filter:drop-shadow(0 0 10px #4d8cff)}\
-.spf-select-hex.pick1::before{box-shadow:inset 0 0 0 2px #4d8cff}\
-.spf-select-hex.pick2{filter:drop-shadow(0 0 10px #ff5a4e)}\
-.spf-select-hex.pick2::before{box-shadow:inset 0 0 0 2px #ff5a4e}\
-.spf-select-hint{font-size:clamp(11px,2.3vh,14px);letter-spacing:1px;color:#c7cbe0;min-height:1.4em;text-align:center}\
-.spf-select-info{font-size:clamp(9px,1.8vh,12px);color:#9aa1bd;letter-spacing:.4px;text-align:center;max-width:min(760px,94vw);min-height:2.8em;line-height:1.55}\
-.spf-select-info b{color:#f0f0f6}\
-.spf-select-info i{color:#7d84a3}\
-.spf-select-info u{color:#bf8cf2;text-decoration:none}\
-.spf-select-start{font-size:clamp(13px,3vh,17px);letter-spacing:4px;font-weight:800;color:#10131a;background:linear-gradient(180deg,#f2de8c,#d9b84a);border:none;border-radius:6px;padding:.7em 2.2em;cursor:pointer;font-family:inherit;box-shadow:0 4px 0 #8f7a2a;transform:translateY(0);opacity:0;pointer-events:none}\
-.spf-select-start.ready{opacity:1;pointer-events:auto}\
-.spf-select-start:active{transform:translateY(2px);box-shadow:0 2px 0 #8f7a2a}`;
+.spf-select{position:fixed;inset:0;z-index:90;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:clamp(5px,1.3vh,14px);font-family:'Arial Black','Arial Bold',Impact,system-ui,sans-serif;color:#fff;user-select:none;padding:clamp(8px,2vh,18px);overflow:hidden;background:linear-gradient(180deg,#0a1a4a 0%,#061033 45%,#03071c 100%)}\
+.spf-select::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.055) 0 2px,transparent 2px 7px);pointer-events:none}\
+.spf-select::after{content:'';position:absolute;inset:0;background:linear-gradient(115deg,transparent 0 42%,rgba(255,255,255,.05) 42% 58%,transparent 58% 100%);pointer-events:none}\
+.spf-select-title{position:relative;z-index:1;font-size:clamp(18px,5.2vh,40px);letter-spacing:2px;font-style:italic;font-weight:900;text-align:center;line-height:1;background:linear-gradient(180deg,#fff7cf 0%,#ffd447 42%,#e09a12 100%);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-stroke:clamp(1.5px,.42vh,3px) #7a1200;paint-order:stroke fill;text-shadow:0 3px 0 #7a1200,0 6px 12px rgba(0,0,0,.7)}\
+.spf-select-subtitle{position:relative;z-index:1;font-size:clamp(9px,1.9vh,12px);letter-spacing:4px;color:#7ea6ff;text-transform:uppercase;text-shadow:0 2px 0 #001038}\
+.spf-select-grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(3,clamp(62px,min(19vw,19vh),140px));gap:clamp(5px,1.2vh,10px)}\
+.spf-select-cell{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;background:none;border:none;padding:0;color:inherit;font-family:inherit}\
+.spf-select-hex{position:relative;width:100%;aspect-ratio:1/1;border:3px solid #0b1a44;border-radius:3px;overflow:hidden;transition:transform .07s steps(2),border-color .12s linear;box-shadow:inset 0 0 0 2px #4a6bd6,3px 3px 0 rgba(0,0,0,.55)}\
+.spf-select-hex::before{content:'';position:absolute;inset:0;background:linear-gradient(160deg,var(--hex) 0%,#101a3a 78%,#060a20 100%)}\
+.spf-select-hex::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.34) 0 22%,transparent 55%);border-bottom:3px solid rgba(0,0,0,.45)}\
+.spf-select-init{position:relative;z-index:2;display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:clamp(26px,6.4vh,52px);font-style:italic;font-weight:900;color:#fff;text-shadow:0 3px 0 #000,0 0 14px rgba(0,0,0,.75);letter-spacing:-1px}\
+.spf-select-cell:hover .spf-select-hex{transform:translate(-1px,-1px) scale(1.05);border-color:#ffd447}\
+.spf-select-cell:focus-visible{outline:none}\
+.spf-select-cell:focus-visible .spf-select-hex{border-color:#ffd447;box-shadow:inset 0 0 0 2px #fff,0 0 16px #ffd447}\
+.spf-select-name{position:relative;z-index:1;font-size:clamp(9px,1.9vh,13px);font-weight:900;letter-spacing:.5px;text-shadow:0 2px 0 #001038;white-space:nowrap}\
+.spf-select-tag{position:relative;z-index:1;font-size:clamp(7px,1.4vh,10px);letter-spacing:.5px;text-align:center;color:#9db9ff;text-shadow:0 1px 0 #001038;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\
+.spf-select-hex.pick1{border-color:#2f6bff;box-shadow:inset 0 0 0 2px #fff,0 0 18px #2f6bff}\
+.spf-select-hex.pick2{border-color:#ff3b30;box-shadow:inset 0 0 0 2px #fff,0 0 18px #ff3b30}\
+.spf-select-badge{position:absolute;z-index:3;top:2px;left:3px;font-size:clamp(9px,1.9vh,13px);font-weight:900;font-style:italic;letter-spacing:.5px;text-shadow:0 2px 0 #000;opacity:0}\
+.spf-select-hex.pick1 .spf-select-badge{opacity:1;color:#6ea2ff}\
+.spf-select-hex.pick2 .spf-select-badge{opacity:1;color:#ff6a60}\
+.spf-select-banner{position:relative;z-index:1;min-height:1.5em;display:flex;align-items:center;justify-content:center;padding:.12em 1.4em;background:linear-gradient(180deg,#f5f7ff 0%,#c3cdf2 48%,#7f8fc9 52%,#e8ecff 100%);border:3px solid #101a3a;box-shadow:0 4px 0 #001038,inset 0 0 0 2px #fff;font-size:clamp(13px,3.4vh,26px);font-style:italic;font-weight:900;letter-spacing:1px;color:#101a3a;text-shadow:0 1px 0 #fff;white-space:nowrap}\
+.spf-select-hint{position:relative;z-index:1;font-size:clamp(10px,2vh,13px);font-weight:900;letter-spacing:2px;color:#ffd447;text-shadow:0 2px 0 #001038;min-height:1.3em;text-align:center}\
+.spf-select-info{position:relative;z-index:1;font-size:clamp(8px,1.7vh,12px);font-weight:400;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#c3d2ff;letter-spacing:.3px;text-align:center;max-width:min(720px,92vw);min-height:2.6em;line-height:1.5;text-shadow:0 1px 0 #001038}\
+.spf-select-info b{color:#fff}\
+.spf-select-info i{color:#8fa8dd}\
+.spf-select-info u{color:#ffd447;text-decoration:none}\
+.spf-select-start{position:relative;z-index:1;font-size:clamp(13px,3vh,20px);letter-spacing:3px;font-style:italic;font-weight:900;color:#5b1000;background:linear-gradient(180deg,#fff3b8 0%,#ffc72c 45%,#e08b00 100%);border:3px solid #5b1000;border-radius:0;padding:.45em 1.9em;cursor:pointer;font-family:inherit;box-shadow:0 5px 0 #5b1000,0 0 22px rgba(255,190,40,.5);text-shadow:0 1px 0 #fff6c9;opacity:0;pointer-events:none;transform:translateY(0)}\
+.spf-select-start.ready{opacity:1;pointer-events:auto;animation:spf-blink 1.05s steps(1,end) infinite}\
+.spf-select-start:active{transform:translateY(3px);box-shadow:0 2px 0 #5b1000}\
+@keyframes spf-blink{0%,60%{filter:brightness(1)}61%,100%{filter:brightness(1.55)}}`;
 
 let SELECT_STYLE = null;
 function ensureStyles() {
@@ -91,7 +120,7 @@ class SelectScreen {
         root.className = 'spf-select';
         root.innerHTML = `
             <div class="spf-select-title">ELIGE TU COMBATIENTE</div>
-            <div class="spf-select-subtitle">los ocho del dojo + tú</div>
+            <div class="spf-select-subtitle">street fighter</div>
         `;
         const grid = document.createElement('div');
         grid.className = 'spf-select-grid';
@@ -105,6 +134,19 @@ class SelectScreen {
             const hex = document.createElement('span');
             hex.className = 'spf-select-hex';
             hex.style.setProperty('--hex', fighter.hex);
+
+            // Sin retratos dibujados, el "retrato" es la inicial sobre el color
+            // del peleador. Es lo que comunica quien es sin un asset que aqui no
+            // existe, y es lo que hace que la rejilla se lea de un vistazo.
+            const init = document.createElement('span');
+            init.className = 'spf-select-init';
+            init.textContent = (fighter.name || '?').trim().charAt(0).toUpperCase();
+            hex.appendChild(init);
+
+            const badge = document.createElement('span');
+            badge.className = 'spf-select-badge';
+            badge.textContent = '1P';
+            hex.appendChild(badge);
 
             const name = document.createElement('span');
             name.className = 'spf-select-name';
@@ -121,11 +163,18 @@ class SelectScreen {
             cell.addEventListener('mouseenter', () => {
                 this.index = i;
                 this.showInfo(i);
+                this.refreshBanner();
             });
             grid.appendChild(cell);
             this.tiles.push(hex);
             this.cells.push(cell);
         });
+
+        // El cartel de nombre: el rasgo mas reconocible de la pantalla. Muestra
+        // el peleador ENFOCADO y cambia al mover el cursor.
+        const banner = document.createElement('div');
+        banner.className = 'spf-select-banner';
+        this.banner = banner;
 
         const hint = document.createElement('div');
         hint.className = 'spf-select-hint';
@@ -146,6 +195,7 @@ class SelectScreen {
         this.start = start;
 
         root.appendChild(grid);
+        root.appendChild(banner);
         root.appendChild(hint);
         root.appendChild(info);
         root.appendChild(start);
@@ -155,6 +205,7 @@ class SelectScreen {
         this.cells[0].focus();
         this.refresh();
         this.showInfo(0);
+        this.refreshBanner();
         this._onKey = (e) => this.onKey(e);
         document.addEventListener('keydown', this._onKey);
     }
@@ -166,6 +217,7 @@ class SelectScreen {
      */
     showInfo(index) {
         if (!this.info) return;
+        this.refreshBanner(index);
         const fighter = this.roster[index];
         if (!fighter) { this.info.textContent = ''; return; }
         const rename = fighter.custom
@@ -213,7 +265,12 @@ class SelectScreen {
             const isP2 = this.pick2 && this.roster[i].id === this.pick2.id;
             hex.classList.toggle('pick1', !!isP1);
             hex.classList.toggle('pick2', !!isP2);
+            // El rotulo cambia: el mismo hueco puede ser el del P1 o el del P2.
+            const badge = hex.querySelector('.spf-select-badge');
+            if (badge) badge.textContent = isP2 ? '2P' : '1P';
         });
+
+        this.refreshBanner();
 
         if (!this.pick1) {
             this.hint.textContent = 'P1 · elige tu peleador';
@@ -226,6 +283,19 @@ class SelectScreen {
         const ready = !!(this.pick1 && this.pick2);
         this.start.classList.toggle('ready', ready);
         if (ready) this.cells[this.index].blur();
+    }
+
+    /**
+     * Pone en el cartel el nombre del peleador enfocado. Es el equivalente al
+     * cartel de SFII: lo que estas a punto de elegir, escrito en grande.
+     *
+     * @param {number} [index] el peleador a mostrar; por defecto, el enfocado
+     */
+    refreshBanner(index) {
+        if (!this.banner) return;
+        const i = typeof index === 'number' ? index : this.index;
+        const f = this.roster[i];
+        this.banner.textContent = f ? f.name : '';
     }
 
     onKey(e) {

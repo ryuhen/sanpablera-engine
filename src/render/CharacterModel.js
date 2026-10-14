@@ -502,7 +502,32 @@ export class CharacterModel {
                     delta = d;
                 }
             } else {
-                base = qRotateVecCached(st.q[b.parentContract], fileT);
+                // AQUI VA EL LOCAL DEL ARCHIVO, TAL CUAL.
+                //
+                // Lo que se escribe en el nodo es un LOCAL: Babylon compone el
+                // mundo del padre por su cuenta al leerlo. Precomponer aqui la
+                // rotacion del padre (que es lo que hacia esto:
+                // `qRotateVecCached(st.q[b.parentContract], fileT)`) cuenta esa
+                // rotacion DOS VECES, y como el error se hereda, cada hueso
+                // cuelga del anterior con un giro de mas que se acumula hacia
+                // abajo por la cadena. Solo son iguales si el padre esta en
+                // identidad, y por eso el maniqui de Khronos no lo notaba.
+                //
+                // MEDIDO, con la pelea en marcha (no con pose vacia, que es
+                // justo el caso donde las dos formulas coinciden y donde no se
+                // puede distinguir un cambio bueno de uno malo):
+                //
+                //                     alcance  cabezaArriba  pie-cadera
+                //   mannequin   antes   1,38      0,63        -0,75
+                //   mannequin   ahora   1,38      0,63        -0,75   (no-op)
+                //   Quaternius   antes   0,31      0,63        +0,72   (retorcido)
+                //   Quaternius   ahora   1,43      0,64        -0,76   (de pie)
+                //
+                // Se mide con relaciones, no con coordenadas: un cuerpo de pie
+                // tiene la cabeza sobre la cadera y los pies debajo. Con el
+                // fallo anterior los pies de Quaternius acababan 72 cm por
+                // ENCIMA de la cadera.
+                base = fileT.slice();
             }
             node.position.set(
                 base[0] + delta[0],
