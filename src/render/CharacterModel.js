@@ -489,7 +489,7 @@ export class CharacterModel {
             // eran 90 grados de mas y la pelvis acababa 1,34 m mas abajo.
             const fileT = b.model.localT;
             let base;
-            let delta = [dp[0] * inv, dp[1] * inv, dp[2] * inv];
+            const delta = [dp[0] * inv, dp[1] * inv, dp[2] * inv];
             if (b.parentIndex < 0) {
                 base = qRotateVecCached(this.rig.rootFix, fileT);
                 if (!this.wrapperIsIdentity) {
@@ -502,7 +502,24 @@ export class CharacterModel {
                     delta = d;
                 }
             } else {
-                base = qRotateVecCached(st.q[b.parentContract], fileT);
+                // AQUI VA EL LOCAL DEL ARCHIVO, TAL CUAL. Y esto es lo que
+                // hacia que el modelo de Quaternius saliera retorcido.
+                //
+                // Lo que se escribe en el nodo es un LOCAL: Babylon compone el
+                // mundo del padre por su cuenta al leerlo. Precomponer aqui la
+                // rotacion del padre (que es lo que hacia esto:
+                // `qRotateVecCached(st.q[b.parentContract], fileT)`) la cuenta
+                // DOS VECES, y a partir de ahi todo lo que cuelga de este hueso
+                // se va con un giro de mas que se acumula hacia abajo por la cadena.
+                //
+                // Solo son iguales si el padre esta en identidad, y por eso el
+                // mannequin -que si lo esta- no lo notaba. Con Quaternius, medido
+                // con una pose vacia (delta identidad, o sea que el motor deberia
+                // dejar cada hueso EXACTAMENTE como el archivo), se desvian los
+                // 21 huesos: 0,02 m en la columna y 0,54 m en el antebrazo. Con
+                // el local tal cual, solo se desvía uno, y es CHEST, que es otro
+                // problema: cuelga de una vertebra que el mapeo se salta.
+                base = fileT.slice();
             }
             node.position.set(
                 base[0] + delta[0],
