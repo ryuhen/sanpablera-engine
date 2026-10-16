@@ -189,5 +189,37 @@ check('con gain 0 el cuello acaba igual que sin la funcion',
     aApag !== null && aRef !== null && Math.abs(aApag - aRef) < 1e-9,
     { apagado: +aApag.toFixed(6), normal: +aRef.toFixed(6) });
 
+// ---------------------------------------------------------------------------
+section('6. EL CONTRATO DE SALIDA: LO QUE EL MOTOR SE COME');
+// ---------------------------------------------------------------------------
+// ESTA SECCION EXISTE POR UN FALLO REAL, y por eso tiene mas peso que las
+// otras. `hitReactionFromContact` devolvia todo menos `weight`, y el consumidor
+// (`blendReactionOverStance`) hace `clamp01(hit.weight)`: undefined entra, sale
+// NaN, y el esqueleto entero se va con el cuerpo invisible y sin una sola
+// excepcion en consola.
+//
+// Las comprobaciones de arriba PASABAN y no lo veian, porque llamaban a la
+// funcion directamente y nunca pasaban el resultado por el mezclador. O sea:
+// se estaba probando la FUNCION y no su CONTRATO DE SALIDA, que es justamente
+// lo que se rompe. La prueba tiene que comerse el resultado como lo come el
+// motor, no solo mirar que la funcion no lanza.
+const FRmod = await load('src/core/entities/FighterRig.js');
+const guardia = FRmod.posturePose(rig, { limbs: 'BRACE', hipY: 0.88 }, {});
+const conContacto = hitReactionFromContact(rig, GOLPE_ALTO, 0.12,
+    { contacto: { punto: [0, 1.5, -0.1], dir: [1, 0, 0.2] } });
+const mezclado = HR.blendReactionOverStance(rig, guardia, conContacto);
+const stMezcla = Rig.fk(rig, mezclado.pose);
+const limpio = ['PELVIS', 'HEAD', 'SPINE', 'FOOT_L'].every(h => stMezcla.p[h]
+    && stMezcla.p[h].every(v => isFinite(v)));
+check('el resultado se puede mezclar sobre la guardia sin NaN', limpio,
+    { pelvis: ' + stMezcla.p.PELVIS, cabeza: ' + stMezcla.p.HEAD });
+check('con contacto trae weight (sin el, el mezclador multiplica por NaN)',
+    typeof conContacto.weight === 'number', '' + conContacto.weight);
+check('sin contacto tambien lo trae',
+    typeof hitReactionPose(rig, GOLPE_ALTO, 0.12, {}).weight === 'number');
+check('y los dos pesos valen lo mismo sin contacto (es la misma reaccion)',
+    Math.abs(conContacto.weight - hitReactionPose(rig, GOLPE_ALTO, 0.12,
+        { contacto: { punto: [0, 1.5, 0], dir: [0, 0, 1] } }).weight) < 1e-9);
+
 console.log('\n' + passed + ' ok, ' + failed + ' FAIL');
 process.exit(failed ? 1 : 0);

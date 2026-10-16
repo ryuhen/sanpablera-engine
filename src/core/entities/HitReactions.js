@@ -588,6 +588,14 @@ export function hitReactionFromContact(rig, move, t, opts = {}) {
         reaction: R,
         height: base.height,
         power: base.power,
+        // weight NO es opcional. Lo lee lendReactionOverStance para mezclar
+        // la reaccion sobre la guardia, y si esta funcion se olvida de devolverlo
+        // el mezclador hace clamp01(undefined) = NaN y el esqueleto entero se
+        // va con el cuerpo invisible. La primera version lo omitia, y la prueba
+        // unitaria NO LO PILLABA porque nunca pasaba el resultado por el mezclador:
+        // lo llamaba directo. Una prueba que solo mira la funcion y no su
+        // contrato de salida no prueba el contrato de salida.
+        weight: base.weight,
         contacto: c
     };
 }

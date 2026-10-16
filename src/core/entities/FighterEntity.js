@@ -217,6 +217,7 @@ export class FighterEntity {
         // El golpe que entro por ultima vez (para la matriz de reacciones) y
         // la tela del peleador, si el engine le ha dado una.
         this._hitMove = null;
+        this._hitContacto = null;
         this.cape = null;
 
         // El siguiente frame se pone la pose SIN MEZCLA. Lo pide el ring-out:
@@ -1197,6 +1198,15 @@ export class FighterEntity {
                 move: fsm.getData('lastHit') ? this._hitMove : null,
                 hitLevel: fsm.getData('hitLevel'),
                 hitT: this._hitProgress(fsm),
+                // Donde y de que lado ha pegado. Sin esto la reaccion no puede
+                // distinguir un jab de la derecha de uno de la izquierda.
+                //
+                // Y se descarta en cuanto no hay golpe activo, en lugar de
+                // esperar a un "fin del hitstun" que no existe como evento: si
+                // se guardara, el proximo impacto usaria el contacto del
+                // anterior, y el peleador echaria la cabeza hacia el lado que
+                // le pegaron hace tres segundos.
+                contacto: fsm.getData('lastHit') ? this._hitContacto : (this._hitContacto = null),
                 // --- levantada y castigo al del suelo -------------------------
                 down: fsm.getData('knockdown'),
                 wakeT: this._wakeProgress(fsm),
@@ -1451,9 +1461,60 @@ export class FighterEntity {
         // ALTURA (cabeza / torso / pierna) y su potencia, que no estan en el
         // `hitLevel` que guarda la FSM.
         this._hitMove = move;
+        // --- EL CONTACTO, PARA QUE LA REACCION MIRE DONDE HA PEGADO ---------
+        //
+        // Hasta aqui la reaccion solo sabia QUE golpe era (frame data). Con esto
+        // sabe DE QUE LADO ha venido, y es lo que hace que un jab de la derecha
+        // eche la cabeza al otro lado que uno de la izquierda. Sin esto el
+        // jugador ve que todos los golpes seuben igual.
+        //
+        // ESPACIO: se calcula en el del QUE RECIBE (Y arriba, Z adelante hacia el
+        // rival), que es donde lo consume `HitReactions.contactoDe`. El
+        // atacante esta delante, o sea en -Z local, y el golpe viaja hacia +Z.
+        //
+        // LA ALTURA DE Y sigue siendo la DECLARADA por el golpe, y hay que
+        // decirlo: el sistema de colisiones no expone todavia el punto real de
+        // interseccion, asi que se usa la banda que declara el frame data. El
+        // LADO si es real, porque sale de donde esta de verdad el atacante.
+        this._hitContacto = this._contactoDe(from, move);
 
         this.fsm.onHit(hit);
         world.hitstop = Math.max(world.hitstop, move.hitstop / 60);
+    }
+
+    /**
+     * El punto y la direccion del golpe, en el espacio de ESTE peleador.
+     *
+     * @param {object} from  la entidad que golpea
+     * @param {object} move el frame data del golpe
+     * @returns {{punto:number[], dir:number[]}}
+     */
+    _contactoDe(from, move) {
+        // La banda de altura que declara el golpe, en metros sobre el suelo.
+        // Son las cuatro que usa la matriz, no numeros inventados: lo que se
+        // guarda es "le ha dado por ahi", no una medicion.
+        const BANDA = { ALTO: 1.58, MEDIO: 1.16, BAJO: 0.72, SUELO: 0.28 };
+        const y = BANDA[move && move.height] || BANDA.MEDIO;
+
+        let x = 0;
+        if (from && from.fighter) {
+            const f = this.fighter.facing;
+            const dx = from.fighter.x - this.fighter.x;
+            const dz = from.fighter.z - this.fighter.z;
+            const largo = Math.hypot(dx, dz);
+            if (largo > 1e-4) {
+                // Se rota el vector al ataque al espacio local. La convencion es
+                // la de `place()`: el frente es (sin(f), cos(f)), asi que al
+                // rotar, un vector de adelante tiene que dar (0, 1).
+                const c = Math.cos(f), s = Math.sin(f);
+                x = (dx * c - dz * s) / largo;
+            }
+        }
+        // El golpe va del atacante hacia aqui, o sea hacia +Z, y hacia el lado
+        // CONTRARIO al que esta el atacante: si el rival viene por mi izquierda,
+        // el puño viaja hacia mi derecha y `dir.x` sale positivo. Es la
+        // convencion de `contactoDe`: positivo = me ha dado por la izquierda.
+        return { punto: [0, y, 0], dir: [-x, 0, 1] };
     }
 
     /** Bloqueo: sin dano, empuje pequeno y micro-congelacion. */

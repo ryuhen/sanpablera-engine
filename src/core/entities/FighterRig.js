@@ -54,7 +54,8 @@ import { fk, solveTwoBone, placeFoot } from '../cine/Rig.js';
 import { ease, clamp01, lerp, vlerp } from '../cine/Math3.js';
 import { attackPoseFor, contextOf } from './AttackPoses.js';
 import {
-    hitReactionPose, blendReactionOverStance, groundAttackPose, wakeupPose,
+    hitReactionPose, hitReactionFromContact, blendReactionOverStance,
+    groundAttackPose, wakeupPose,
     HitHeight, HitPower
 } from './HitReactions.js';
 
@@ -684,7 +685,16 @@ export function attackPose(rig, moveKey, phase, t, opts = {}) {
  */
 export function flinchPose(rig, hitLevel, opts = {}) {
     const move = opts.move || { hitLevel: hitLevel || 'MEDIO', height: 'MEDIO' };
-    const hit = hitReactionPose(rig, move, opts.t != null ? opts.t : 0, opts);
+    // CON CONTACTO, LA REACCION MIRA DONDE HA PEGADO.
+    //
+    // `hitReactionFromContact` devuelve EXACTAMENTE lo mismo que
+    // `hitReactionPose` cuando no le llega contacto, asi que se puede llamar
+    // siempre y no hay dos caminos que mantener. Con contacto, el lado del que
+    // viene el golpe decide hacia donde se echa la cabeza, que es justo lo que
+    // la tabla sola no puede saber.
+    const hit = opts.contacto
+        ? hitReactionFromContact(rig, move, opts.t != null ? opts.t : 0, opts)
+        : hitReactionPose(rig, move, opts.t != null ? opts.t : 0, opts);
     // La postura de combate se pasa YA RESUELTA: es la guardia que el peleador
     // tenia cuando le pegaron, y la reaccion se le echa encima (ver
     // HitReactions.blendReactionOverStance, que explica por que es aditiva).
@@ -854,7 +864,10 @@ export function poseFor(rig, snap, opts = {}) {
     // --- 6. impacto ----------------------------------------------------
     if (groups.indexOf('IMPACT') !== -1 || groups.indexOf('STUNNED') !== -1) {
         return flinchPose(rig, snap.hitLevel, Object.assign({}, opts, {
-            move: snap.move || null, t: snap.hitT
+            move: snap.move || null, t: snap.hitT,
+            // El punto y la direccion del impacto. Sin esto la reaccion es la
+            // misma para un jab de derecha que para uno de izquierda.
+            contacto: snap.contacto || null
         }));
     }
 
@@ -868,14 +881,16 @@ export {
     // sus archivos (AttackPoses / HitReactions) porque son cosas distintas:
     // unas eligen COMO se ve un golpe y otras COMO se recibe.
     attackPoseFor, contextOf,
-    hitReactionPose, blendReactionOverStance, groundAttackPose, wakeupPose,
+    hitReactionPose, hitReactionFromContact, blendReactionOverStance,
+    groundAttackPose, wakeupPose,
     HitHeight, HitPower
 };
 
 export default {
     posturePose, attackPose, flinchPose, downPose, floatPose, poseFor, locoPose,
     attackPoseFor, contextOf,
-    hitReactionPose, blendReactionOverStance, groundAttackPose, wakeupPose,
+    hitReactionPose, hitReactionFromContact, blendReactionOverStance,
+    groundAttackPose, wakeupPose,
     HitHeight, HitPower,
     ATTACK_KEYS, LIMB_SPECS, STYLE_MODS, LOCO_POSTURES, ATTACK_LOCO_MODS,
     STANCE_ARMS
