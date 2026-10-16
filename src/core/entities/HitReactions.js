@@ -525,7 +525,7 @@ export function hitReactionFromContact(rig, move, t, opts = {}) {
     // Cuanto manda la direccion sobre la tabla. `gain` a 0 deja el
     // comportamiento anterior intacto, que es lo que permite desactivar la
     // funcion sin tocar el codigo.
-    const gain = opts.gain === undefined ? 0.55 : opts.gain;
+    const gain = opts.gain === undefined ? 1 : opts.gain;
 
     // -----------------------------------------------------------------------
     // LA TRAMPA DE AQUI, Y POR QUE ESTA ES LA FORMA BUENA
@@ -556,8 +556,23 @@ export function hitReactionFromContact(rig, move, t, opts = {}) {
     const [sp, sy, sr] = R.spine;
     const [hp, hy] = R.head;
 
-    const yawTorso = lerp(sy, c.torque * (Math.abs(sy) + 0.25), gain) * w;
-    const yawCuello = lerp(hy, -c.lado * (Math.abs(hy) + 0.30), gain) * w;
+    // LA DIRECCION LA MANDA SIEMPRE EL CONTACTO; LA TABLA SOLO APORTA EL CUANTO.
+    //
+    // POR QUE NO UN `lerp` ENTRE LAS DOS. Se probo y no sale un espejo: con la
+    // tabla en -0,34, el lado izquierdo daba lerp(-0,34; -0,64) = -0,505 y el
+    // derecho lerp(-0,34; +0,64) = +0,199. La diferencia no es 0,64 y -0,64,
+    // son dos magnitudes distintas, porque al interpolar entre valores de
+    // signo opuesto la mitad del recorrido se gasta en cruzar el cero. Medido en
+    // el motor: los dos golpes echaban la cabeza al MISMO lado y lo unico que
+    // se distinguia eran 18 cm de profondeur.
+    //
+    // Asi que el signo sale del contacto sin interpolar con nada, y la
+    // magnitud sale de la tabla. El `lerp` solo se queda para el `gain`, que es
+    // el dial que apaga la funcion.
+    const magCuello = (Math.abs(hy) + 0.30) * w;
+    const magTorso = (Math.abs(sy) + 0.25) * w;
+    const yawCuello = lerp(hy * w, -c.lado * magCuello, gain);
+    const yawTorso = lerp(sy * w, c.torque * magTorso, gain);
     // El ALABEO (roll) es el segundo eje lateral, y le pasa lo mismo que al yaw:
     // la tabla trae +0,22 fijo, y si se le suma el lado del impacto ese fijo
     // gana para un lado y no para el otro, y los dos golpes acaban inclinados

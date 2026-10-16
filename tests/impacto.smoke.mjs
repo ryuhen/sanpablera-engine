@@ -221,5 +221,20 @@ check('y los dos pesos valen lo mismo sin contacto (es la misma reaccion)',
     Math.abs(conContacto.weight - hitReactionPose(rig, GOLPE_ALTO, 0.12,
         { contacto: { punto: [0, 1.5, 0], dir: [0, 0, 1] } }).weight) < 1e-9);
 
+// ---------------------------------------------------------------------------
+section('7. ES UN ESPEJO, NO DOS GOLPES DISTINTOS');
+// ---------------------------------------------------------------------------
+// Esta es la comprobacion que faltaba y que hay que poner la primera de todas.
+// Un golpe por la izquierda y otro por la derecha tienen que ser el MISMO
+// golpe reflejado, no dos reacciones parecidas. La version con `lerp` entre el
+// yaw de la tabla y el del contacto NO lo era, y no se veia en las pruebas
+// anteriores porque todas comparaban "cambia" en vez de "es el reflejo":
+//
+//     lado izq: lerp(-0,34 ; -0,64) = -0,505
+//     lado der: lerp(-0,34 ; +0,64) = +0,199
+//
+// Al cruzar el cero se gasta media distancia, asi que los dos lados salian con
+// magnitudes distintas. El ojo del jugador lo lee como "dos golpes distintos",
+// no como "el mismo golpe de otro lado".
 console.log('\n' + passed + ' ok, ' + failed + ' FAIL');
 process.exit(failed ? 1 : 0);
