@@ -26,3 +26,6 @@ tmp_*.txt
 *.tmp
 npm-debug.log*
 yarn-error.log*
+
+# Fichero de trabajo: el mensaje del commit, no fuente.
+BITACORA_MSG.txt
