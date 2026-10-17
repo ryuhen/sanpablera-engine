@@ -1,31 +1,40 @@
-﻿El personaje de verdad por defecto: fuera el maniqui de depuracion
+﻿Las diagonales del dpad salian al doble de velocidad
 
-LO QUE CAMBIA
+EL BUG
 
-Una linea: el modelo por defecto deja de ser `mannequin.glb` y pasa a ser el
-Superhero de Quaternius (CC0). Se sigue entrando por `?modelo=...` para
-cambiarlo, y el maniqui sigue a mano con `?modelo=assets/characters/mannequin.glb`.
+El dpad tiene ocho banderas: cuatro rectas (up/down/left/right) y cuatro
+diagonales con nombre (upLeft/upRight/downLeft/downRight). El codigo las
+sumaba todas:
 
-POR QUE ERA URGENTE Y NO ESTETICO
+    if (this.dpad.left)    vector.x -= 1;   // el dedo a la izquierda
+    if (this.dpad.upLeft)  vector.x -= 1;   // LA MISMA diagonal, otra vez
 
-`mannequin.glb` no es un personaje: es el "rigged figure" de Khronos, un modelo
-de REFERENCIA para medir pipelines. 49 KB de cajas y cilindros. Durante meses
-todo el juego se ha estado viendo contra eso, y de ahi el "no veo personajes
-de verdad".
+Con dos dedos -uno a la izquierda y otro arriba- la UI marca `left` Y `upLeft`
+a la vez, porque eso es una diagonal arriba-izquierda. La X valia -2 en vez de
+-1, y la normalizacion la dejaba en -1,41 en lugar de 0,71.
 
-PERO LA RAZON DE FONDO ES OTRA
+Lo que se ve en pantalla no es "una diagonal rara": es que el peleador hace la
+diagonal al DOBLE de velocidad que la recta, y es facil culpar al mando que no
+existe en vez de al codigo que si.
 
-El maniqui no solo era feo: IMPIDIA DIAGNOSTICAR. Con el, un esqueleto roto y
-una pose que no llega se ven exactamente igual, porque el sitio es un tronco de
-cajas en los dos casos. Con el Superhero se ve la guardia de boxeo - punos a
-la cara, codos doblados - y eso solo aparece si los huesos se escriben Y la
-malla los sigue. Por eso el cambio no es cosmetico: es lo que permitio saber
-que el render estaba bien y el fallo era de otro sitio.
+LA REGLA QUE SE APLICA
 
-Lo que este commit NO arregla
+Las cuatro rectas mandan. Si hay alguna pulsada, la diagonal sale de combinar
+las que haya y las banderas con nombre no se suman. Solo si no hay ninguna
+recta se mira si hay una diagonal con nombre puesta, que cubre el control que
+solo sepa dar diagonales.
 
-Los golpes siguen sin animarse. Un filmstrip de doce capturas en mitad de un
-jab sale con los dos peleadores identicos: misma guardia, misma pose, cero
-extension de brazo. Y el maniqui ya no es la excusa. Queda por cerrar.
+Asi el resultado no depende de COMO se pulso: dos dedos en arriba e izquierda,
+o una sola bandera `upLeft`, dan el mismo vector.
 
-Suite completa en verde.
+31 comprobaciones. Suite completa en verde.
+
+LO QUE ESTO NO ABRE
+
+De los once puntos que pediste, este es el primero. Quedan el dev menu en la
+inicial, los cuadros de luchadores mas pequenos con dos filas bajo el mapa, la
+cuadricula de escenarios con miniatura, el mapeo de bluetooth, y las siluetas
+de golpe nuevas. Y sigue abierta una limitacion real de controles que se ha
+quedado documentada al mirar el codigo: `InputMapper` reserva ATAQUE_LIGERO +
+ATAQUE_PESADO a la vez como COMBO (linea 116), asi que con dos botones de
+golpe el unico uso de pulsarlos juntos es el especial, no dos ataques.
