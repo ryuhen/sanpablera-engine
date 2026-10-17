@@ -77,9 +77,25 @@ const { Intent } = SPF;
 // para comprobar la animacion sin depender de la malla de ningun modelo
 // concreto, y de paso da una silueta clara de quien es quien en el ring.
 const USE_PARTS = new URLSearchParams(location.search).get('piezas') === '1';
+// POR DEFECTO, EL PERSONAJE DE VERDAD.
+//
+// Antes aqui iba `mannequin.glb`. Es el "rigged figure" de Khronos, un modelo de
+// REFERENCIA de depuracion: 49 KB de cajas y cilindros que existen para medir
+// pipelines, no para jugar. Se llamaba "el maniqui" y lo era.
+//
+// Lo que se pone ahora es el Superhero de Quaternius (CC0), que si tiene cara,
+// manos y musculatura. Y no es un capricho de aspecto: un filmstrip de doce
+// capturas demuestra que este modelo entra en guardia de boxeo correcta -
+// punos a la cara, codos doblados - y eso solo es posible si los huesos se
+// escriben Y la malla los sigue. Con el maniqui de Khronos no se podia
+// distinguir un esqueleto roto de una pose que no llegaba, porque el sitio se
+// parecia a un tronco de cajas tanto si funcionaba como si no.
+//
+// Sigue estando el maniqui con `?modelo=assets/characters/mannequin.glb`, que
+// para depurar huesos sigue siendo mas comodo que un modelo con texturas.
 const MODEL_URL = (() => {
     const alt = new URLSearchParams(location.search).get('modelo');
-    return alt ? './' + alt.replace(/^\.?\//, '') : './assets/characters/mannequin.glb';
+    return alt ? './' + alt.replace(/^\.?\//, '') : './assets/characters/quaternius-superhero-male/Superhero_Male_FullBody.gltf';
 })();
 // Las dos esquinas del ring. P1 a un lado, P2 al opuesto, y LOS DOS miran al
 // rival. Quien ocupa cada esquina se elige en la pantalla de seleccion

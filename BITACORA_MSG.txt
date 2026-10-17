@@ -1,0 +1,31 @@
+﻿El personaje de verdad por defecto: fuera el maniqui de depuracion
+
+LO QUE CAMBIA
+
+Una linea: el modelo por defecto deja de ser `mannequin.glb` y pasa a ser el
+Superhero de Quaternius (CC0). Se sigue entrando por `?modelo=...` para
+cambiarlo, y el maniqui sigue a mano con `?modelo=assets/characters/mannequin.glb`.
+
+POR QUE ERA URGENTE Y NO ESTETICO
+
+`mannequin.glb` no es un personaje: es el "rigged figure" de Khronos, un modelo
+de REFERENCIA para medir pipelines. 49 KB de cajas y cilindros. Durante meses
+todo el juego se ha estado viendo contra eso, y de ahi el "no veo personajes
+de verdad".
+
+PERO LA RAZON DE FONDO ES OTRA
+
+El maniqui no solo era feo: IMPIDIA DIAGNOSTICAR. Con el, un esqueleto roto y
+una pose que no llega se ven exactamente igual, porque el sitio es un tronco de
+cajas en los dos casos. Con el Superhero se ve la guardia de boxeo - punos a
+la cara, codos doblados - y eso solo aparece si los huesos se escriben Y la
+malla los sigue. Por eso el cambio no es cosmetico: es lo que permitio saber
+que el render estaba bien y el fallo era de otro sitio.
+
+Lo que este commit NO arregla
+
+Los golpes siguen sin animarse. Un filmstrip de doce capturas en mitad de un
+jab sale con los dos peleadores identicos: misma guardia, misma pose, cero
+extension de brazo. Y el maniqui ya no es la excusa. Queda por cerrar.
+
+Suite completa en verde.
