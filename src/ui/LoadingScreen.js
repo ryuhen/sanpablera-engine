@@ -44,6 +44,18 @@
  * ============================================================================
  */
 
+/**
+ * La postal de Margarita, que va por encima del muro.
+ *
+ * POR QUE SE IMPORTA AQUI Y NO SE PINTA DENTRO
+ *   El muro de esta pantalla es un montage de capas posicionadas en absoluto
+ *   con su propio z-index. Meter la postal dentro del mismo arbol obligaba a
+ *   pelearle el z-index a una capa que esta por debajo de la fecha, y el
+ *   resultado dependia del orden de capas. Va al `body` y se monta por encima
+ *   de todo.
+ */
+import { montarPostal } from './Postcard.js';
+
 /** Marca de la hoja de estilos para no duplicarla si se crea dos veces. */
 const STYLE_ID = 'sanpablera-loading-style';
 
@@ -477,6 +489,11 @@ export class LoadingScreen {
         this._raf = 0;
         this._lastTime = 0;
         this._orientation = null;
+        // La postal va al `body`, no dentro de `root`. El muro de grafiti de
+        // esta pantalla esta lleno de capas posicionadas en absoluto y el
+        // z-index de la postal se comeria con ellas; fuera del arbol de la
+        // pantalla se monta por encima de todo y se quita de un tiron.
+        this.postal = montarPostal({ destino: opts.destino || null });
         this._startedPromise = new Promise((resolve) => { this._resolveStarted = resolve; });
 
         this._injectStyle();
@@ -923,6 +940,11 @@ export class LoadingScreen {
         if (this.root && this.root.parentNode) this.root.parentNode.removeChild(this.root);
         const style = document.getElementById(STYLE_ID);
         if (style && style.parentNode) style.parentNode.removeChild(style);
+        // La postal vive en el body, NO dentro de `this.root`. Quitar el arbol
+        // de la pantalla no se la lleva, y sin esto se queda pegada encima del
+        // menu de seleccion durante toda la sesion.
+        if (this.postal && this.postal.parentNode) this.postal.parentNode.removeChild(this.postal);
+        this.postal = null;
     }
 
     // =========================================================================

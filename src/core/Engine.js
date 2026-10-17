@@ -38,6 +38,7 @@
 import UI from '../ui/UI.js';
 import { ControlsScreen } from '../ui/ControlsScreen.js';
 import { DevMenu } from '../ui/DevMenu.js';
+import { siguiente } from '../core/geo/margarita.js';
 import { resolveClash } from './clinch.js';
 import { makeLocoState, readLoco, LOCO, LOCO_TABLE } from './locomotion.js';
 import HUD from '../ui/HUD.js';
@@ -144,7 +145,22 @@ const INTERACT_RANGE = 1.25;
 
 const loading = new LoadingScreen({
     title: 'SANPABLERA',
-    subtitle: 'MOTOR DE LUCHA'
+    subtitle: 'MOTOR DE LUCHA',
+    // El destino que se anuncia en la postal. Con el torneo sin empezar,
+    // `siguiente({})` da el PRIMER lugar, que es Playa del Agua: el sitio por
+    // el que entra todo el mundo. No es un adorno ni un texto fijo: sale de la
+    // misma tabla que despues gobierna el mapa, asi que la postal no puede
+    // prometer un sitio al que el torneo no llegue.
+    destino: (() => {
+        try {
+            const s = siguiente({});
+            return s ? { nombre: s.nombre, fundacion: s.fundacion } : null;
+        } catch (err) {
+            // La postal es adorno con un dato dentro: si la geografia no esta,
+            // se dibuja sin destino y el juego carga igual.
+            return null;
+        }
+    })()
 });
 loading.step('motor');
 
