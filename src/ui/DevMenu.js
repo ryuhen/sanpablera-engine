@@ -96,6 +96,13 @@ export class DevMenu {
         const toggle = document.createElement('button');
         toggle.textContent = 'DEV';
         toggle.title = 'Menu de desarrollo';
+        // Clase PROPIA y no solo texto. El toggle se busca desde fuera (las
+        // sondas lo hacen, y cualquier script que quiera abrirlo), y el
+        // selector obvio `.spf-dev-fab button` deja de funcionar en cuanto el
+        // panel se pinta: sus botones van antes en el DOM y el selector pilla
+        // uno de esos. Lo que se acababa teniendo es un menu que "no se abre"
+        // porque en realidad se le estaba dando a "cerrar".
+        toggle.className = 'spf-dev-toggle';
         const panel = document.createElement('div');
         panel.className = 'spf-dev-panel';
         panel.style.display = 'none';
@@ -109,8 +116,11 @@ export class DevMenu {
         this.panel = panel;
         this.toggle = toggle;
         this.pintar();
-        // Se repinta solo, porque un panel que dice 60 fps congelado miente.
-        this._t = setInterval(() => { if (this.abierto) this.pintar(); }, 500);
+        // Se repinta solo porque un panel que dice "0 fps" congelado miente, y
+        // porque las herramientas se activan a mitad de la carga: abierto al
+        // principio con los botones deshabilitados y sin repintar, se quedaba
+        // diciendo que no habia nada que abrir.
+        this._t = setInterval(() => this.pintar(), 500);
         return this;
     }
 
@@ -118,7 +128,7 @@ export class DevMenu {
         this.abierto = !this.abierto;
         this.panel.style.display = this.abierto ? '' : 'none';
         this.toggle.classList.toggle('activo', this.abierto);
-        if (this.abierto) this.pintar();
+        this.pintar();
     }
 
     /** Los frames por segundo REALES, no los que juega el motor. */
@@ -143,7 +153,7 @@ export class DevMenu {
             d = {};
         }
         const filas = [
-            ['modelo', d.modelo || MODELO_POR_DEFECTO.split('/').pop()],
+            ['modelo', d.modelo || '—'],
             ['huesos', d.huesos != null ? d.huesos : '—'],
             ['peleadores', d.peleadores != null ? d.peleadores : '—'],
             ['fps', this.fps + (this.fps < 20 ? '  (va lento)' : '')]

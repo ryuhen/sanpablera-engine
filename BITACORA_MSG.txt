@@ -1,42 +1,34 @@
-﻿Los botones del menu ya no son adorno: abren las herramientas de verdad
+﻿El menu de desarrollo, comprobado DENTRO de la pelea
 
-EL FALLO
+TRES FALLOS QUE HACIA FALLAR AL MENU
 
-Los botones de inspector y controles NO funcionaban, y la causa no era el
-boton: el menu lanzaba una KeyboardEvent sintetica esperando que el atajo de F1
-la cogiera, pero ESE LISTENER SE REGISTRA DESPUES, cuando el motor ya ha
-montado el modelo. En la pantalla inicial no existe todavia, asi que la tecla
-sintetica no tenia a quien llamar. El boton pulsaba, no pasaba nada, y no habia
-ninguna pista de por que.
+Uno: el boton de DEV ya no se encontraba con su propio selector. Al pintarse
+el panel, sus botones van antes en el DOM, asi que `.spf-dev-fab button` cogia
+uno de esos. Lo que se tenia era un menu que "no se abria" porque en realidad
+se le estaba dando a "cerrar". El toggle lleva ahora clase propia.
 
-Es el peor fallo posible: no es un error visible, es un boton que no hace nada
-y parece de adorno.
+Dos: el panel se repintaba solo SOLO cuando estaba abierto, y como el toggle
+no se encontraba, nunca se abria, y por tanto nunca se repintaba. Se quedaba
+enseñando el estado del primer instante: botones deshabilitados de carga, para
+siempre. Ahora repinta siempre.
 
-LO QUE SE HACE
+Tres, el gordo: `pintar()` tiraba `ReferenceError: MODELO_POR_DEFECTO is not
+defined`. Quite el import y deje el uso. 48 excepciones en la corrida -una cada
+medio segundo- y el panel NUNCA terminaba de pintarse. Ese era el motivo real de
+que los botones estuvieran deshabilitados dentro de la pelea, donde las
+herramientas si existen: no era que estuvieran deactivated, era que el pintado
+se caia a medias antes de llegar a ellos.
 
-Las aperturas salen del keydown a dos funciones con nombre, `abrirInspector` y
-`abrirControles`, que se publican en window.SANPABLERA. El atajo las llama igual
-que antes, asi que F1 y F2 siguen haciendo lo de siempre. El menu ya no lanza
-teclas: llama a las funciones.
+COMPROBADO EN EL NAVEGADOR, DENTRO DE LA PELEA
 
-Y COMO SE DICE CUANDO NO HAY NADA QUE ABRIR
+Panel abierto, cuatro botones habilitados, cero excepciones, y el boton de
+controles abre la pantalla de controles (un nodo mas en el cuerpo).
 
-En la pantalla inicial las herramientas NO existen todavia, y ahora el boton lo
-dice: sale deshabilitado y con un aviso de que se activan al terminar de
-cargar. Antes estaba pulsable y no hacia nada.
+QUE SIGUE SIN FUNCIONAR
 
-La regla: un boton que no puede hacer nada debe parecer que no puede hacer
-nada. Un boton vivo que no hace nada hace que el jugador sospeche del menu
-entero, y el menu entero funciona.
+El diagnostico ensea "—" en modelo, huesos y peleadores: lee
+window.SANPABLERA.fighters y llega vacio. Los fps si funcionan (23,8 leidos),
+porque los cuenta el menu con su propio requestAnimationFrame. Queda por mirar
+de donde sale la lista de peleadores que el menu cree leer.
 
-Se va tambien la funcion `pulsar`, que ya no la usa nadie. Codigo muerto en un
-fichero pequeno es codigo muerto que el proximo lee y se pregunta por que esta.
-
-LO QUE NO SE HA VERIFICADO
-
-Que los botones FUNCIONEN cuando estan activos. En la pantalla inicial lo
-comprobado es lo contrario: salen deshabilitados, que es lo correcto. La
-comprobacion de "abre el inspector de verdad" esta pendiente de correrla ya
-dentro de la pelea, donde las herramientas si existen.
-
-Sigue sin conectar el entrenamiento, que avisa en vez de fingir.
+El entrenamiento sigue sin conectar: el boton avisa en vez de fingir.
