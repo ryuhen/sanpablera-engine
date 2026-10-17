@@ -40,20 +40,6 @@ function asegurarEstilo() {
     return estilo;
 }
 
-/**
- * Lanza una tecla de verdad.
- *
- * POR QUE NO ES `document.dispatchEvent` Y LISTO
- *   El juego abre el inspector desde un `keydown` que mira `e.code`, no
- *   `e.key`. Un evento sin `code` pasa por delante sin activar nada, y el
- *   boton pareceria roto sin motivo. Se rellenan los tres campos que un
- *   evento real traeria.
- */
-function pulsar(code, key, vk) {
-    window.dispatchEvent(new KeyboardEvent('keydown', { code, key, windowsVirtualKeyCode: vk, bubbles: true }));
-    setTimeout(() => window.dispatchEvent(new KeyboardEvent('keyup', { code, key, windowsVirtualKeyCode: vk, bubbles: true })), 60);
-}
-
 const CSS = `
 .spf-dev-fab{position:fixed;left:10px;bottom:10px;z-index:120;display:flex;gap:5px;
 align-items:center;font:700 10px/1 Consolas,monospace;letter-spacing:1px}
@@ -166,12 +152,29 @@ export class DevMenu {
         for (const [k, v] of filas) {
             html += `<div class="spf-dev-fila"><b>${k}</b><i>${v}</i></div>`;
         }
+
+        // Las herramientas existen cuando el motor ha llegado al punto donde las
+        // registra. En la pantalla de carga todavia no, y fingir que si -dejar
+        // el boton pulsable y que no pase nada- es peor que deshabilitado: el
+        // jugador deduce que el menu esta roto cuando lo que pasa es que aun
+        // no toca.
+        const sp = window.SANPABLERA || {};
+        const hayInspector = typeof sp.abrirInspector === 'function';
+        const hayControles = typeof sp.abrirControles === 'function';
+
         html += '<div class="spf-dev-sep"></div><div class="spf-dev-btns">';
-        html += '<button data-a="inspector">Inspector de<br>animaciones (F2)</button>';
-        html += '<button data-a="controles">Controles y<br>mando (F1)</button>';
+        html += '<button data-a="inspector"' + (hayInspector ? '' : ' disabled')
+            + '>Inspector de<br>animaciones (F2)</button>';
+        html += '<button data-a="controles"' + (hayControles ? '' : ' disabled')
+            + '>Controles y<br>mando (F1)</button>';
         html += '<button data-a="entrenar">Entrenar<br>peleador</button>';
         html += '<button data-a="cerrar">Cerrar</button>';
         html += '</div>';
+        if (!hayControles) {
+            html += '<div class="spf-dev-aviso">Las herramientas se activan al '
+                + 'terminar de cargar el modelo. En la pantalla inicial todavia '
+                + 'no hay nada que abrir.</div>';
+        }
         if (!this.alEntrenar) {
             html += '<div class="spf-dev-aviso">El entrenamiento todavia no esta'
                 + ' conectado: este boton solo avisa.</div>';
@@ -182,8 +185,12 @@ export class DevMenu {
         this.panel.innerHTML = html;
 
         const boton = (a) => this.panel.querySelector(`[data-a="${a}"]`);
-        boton('inspector').addEventListener('click', () => pulsar('F2', 'F2', 113));
-        boton('controles').addEventListener('click', () => pulsar('F1', 'F1', 112));
+        if (hayInspector) {
+            boton('inspector').addEventListener('click', () => sp.abrirInspector());
+        }
+        if (hayControles) {
+            boton('controles').addEventListener('click', () => sp.abrirControles());
+        }
         boton('cerrar').addEventListener('click', () => this.alternar());
         const ent = boton('entrenar');
         if (this.alEntrenar) ent.addEventListener('click', () => this.alEntrenar());

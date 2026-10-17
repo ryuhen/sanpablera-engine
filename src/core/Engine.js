@@ -862,17 +862,21 @@ async function boot() {
     // teclado, para que el WASD no mueva al peleador mientras estas mirando el
     // jab.
     let controlsOpen = false;
-    window.addEventListener('keydown', (e) => {
-        if (e.code === 'F2') {
-            e.preventDefault();
-            const abriendo = !inspector.isOpen();
-            if (abriendo) { ui.router.releaseAll(); inputMapper.reset(); }
-            inspector.toggle();
-            if (!inspector.isOpen()) { ui.router.releaseTouch(); inputMapper.reset(); }
-            return;
-        }
-        if (e.code !== 'F1' || controlsOpen) return;
-        e.preventDefault();
+
+    // Las aperturas se nombran aparte para que el menu de desarrollo las pueda
+    // llamar. Antes solo existian dentro del `keydown`, y el menu lanzaba una
+    // tecla sintetica para Leveragearlas: funcionaba a veces y fallaba sin
+    // motivo aparente, porque este listener se registra AQUI, ya montado el
+    // motor, y en la pantalla de carga todavia no existe. El boton pulsaba y
+    // no pasaba nada, que es el peor fallo posible: parece roto.
+    const abrirInspector = () => {
+        const abriendo = !inspector.isOpen();
+        if (abriendo) { ui.router.releaseAll(); inputMapper.reset(); }
+        inspector.toggle();
+        if (!inspector.isOpen()) { ui.router.releaseTouch(); inputMapper.reset(); }
+    };
+    const abrirControles = () => {
+        if (controlsOpen) return;
         controlsOpen = true;
         ui.router.releaseAll();
         inputMapper.reset();
@@ -881,6 +885,24 @@ async function boot() {
             ui.router.releaseTouch();
             inputMapper.reset();
         });
+    };
+
+    // Se publican para el menu de desarrollo. Antes el menu no tenia forma de
+    // saber si la herramienta estaba lista, y el boton queda deshabilitado
+    // hasta que el motor llega aqui.
+    if (!window.SANPABLERA) window.SANPABLERA = {};
+    window.SANPABLERA.abrirInspector = abrirInspector;
+    window.SANPABLERA.abrirControles = abrirControles;
+
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'F2') {
+            e.preventDefault();
+            abrirInspector();
+            return;
+        }
+        if (e.code !== 'F1' || controlsOpen) return;
+        e.preventDefault();
+        abrirControles();
     });
 
     // --- Bucle ------------------------------------------------------------
