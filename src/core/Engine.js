@@ -37,6 +37,7 @@
 
 import UI from '../ui/UI.js';
 import { ControlsScreen } from '../ui/ControlsScreen.js';
+import { DevMenu } from '../ui/DevMenu.js';
 import { resolveClash } from './clinch.js';
 import { makeLocoState, readLoco, LOCO, LOCO_TABLE } from './locomotion.js';
 import HUD from '../ui/HUD.js';
@@ -146,6 +147,44 @@ const loading = new LoadingScreen({
     subtitle: 'MOTOR DE LUCHA'
 });
 loading.step('motor');
+
+// ===========================================================================
+// 1b. EL MENU DE DESARROLLO
+// ===========================================================================
+//
+// Va en el CUERPO y no dentro de la pantalla de carga, a proposito: si viviera
+// dentro, se moriria con ella y habria que volver a abrirlo en cada combate.
+// En el cuerpo esta siempre, desde el primer segundo, que es cuando mas hace
+// falta.
+//
+// Y el diagnostico que enseña sale de aqui y no de un sitio inventado: el
+// modelo que se ha cargado de verdad, los huesos que se han leido del .glb y
+// los peleadores que hay en pie. Es la misma informacion que se lleva tres
+// horas intentando sacar a mano por la consola.
+const devMenu = new DevMenu({
+    diagnostico: () => {
+        // Se lee EN EL MOMENTO de pintarlo y no de una copia guardada al
+        // cargar: el modelo puede tardar en llegar y un panel que enseña "—"
+        // mientras carga y "Superhero" despues, se ve. Una copia congelada
+        // mentiria justo cuando importa.
+        //
+        // Y TODO se lee por `window.SANPABLERA`, nada por variable de este
+        // fichero. La primera version contaba `entities.length` directo y
+        // reventaba: `entities` se declara mas abajo con const, asi que al
+        // pintarse el panel aun estaba en su zona muerta, tiraba la excepcion
+        // y el panel salia VACIO. El boton pulsaba, el panel se abria, y no
+        // habia ni una fila: de esos fallos que parecen "el menu va vacio".
+        const sp = window.SANPABLERA || {};
+        const fs = sp.fighters || [];
+        const conMalla = fs.find(f => f && f.model);
+        return {
+            modelo: conMalla ? MODELO_URL.split('/').pop() : 'cargando...',
+            huesos: conMalla && conMalla.model.rig ? conMalla.model.rig.bones.length : null,
+            peleadores: (sp.entities || []).length
+        };
+    }
+});
+devMenu.montar(document.body);
 
 // ===========================================================================
 // 2. MOTOR Y ESCENA

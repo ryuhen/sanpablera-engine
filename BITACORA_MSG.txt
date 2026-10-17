@@ -1,40 +1,49 @@
-﻿Las diagonales del dpad salian al doble de velocidad
+﻿El menu de desarrollo, en la pantalla inicial
 
-EL BUG
+LO QUE ES
 
-El dpad tiene ocho banderas: cuatro rectas (up/down/left/right) y cuatro
-diagonales con nombre (upLeft/upRight/downLeft/downRight). El codigo las
-sumaba todas:
+Un boton DEV abajo a la izquierda, desde el primer segundo y sin entrar al
+juego, que abre un panel con dos cosas: DIAGNOSTICO y HERRAMIENTAS.
 
-    if (this.dpad.left)    vector.x -= 1;   // el dedo a la izquierda
-    if (this.dpad.upLeft)  vector.x -= 1;   // LA MISMA diagonal, otra vez
+El diagnostico enseña el modelo que se ha cargado de verdad, cuantos huesos se
+han leido del .glb, cuantos peleadores hay en pie y los fps MEDIDOS. Los fps se
+cuentan con un requestAnimationFrame propio, no se leen de un contador que
+pueda estar mintiendo.
 
-Con dos dedos -uno a la izquierda y otro arriba- la UI marca `left` Y `upLeft`
-a la vez, porque eso es una diagonal arriba-izquierda. La X valia -2 en vez de
--1, y la normalizacion la dejaba en -1,41 en lugar de 0,71.
+Y no es adorno. Esta sesion se perdio entera por medir sin mirar: una sonda
+dijo "cambio 0,0000" porque el bucle de render no corria dentro de
+Runtime.evaluate, y otra dio "CONGELADO" porque nunca paso de la pantalla de
+carga. Un panel que dice la verdad ahorra esas horas la proxima vez.
 
-Lo que se ve en pantalla no es "una diagonal rara": es que el peleador hace la
-diagonal al DOBLE de velocidad que la recta, y es facil culpar al mando que no
-existe en vez de al codigo que si.
+LAS HERRAMIENTAS
 
-LA REGLA QUE SE APLICA
+Botones que abren el inspector de animaciones y el configurador de controles,
+que YA EXISTIAN y solo se ABRIAN con F2 y F1. No se reimplementan: el menu
+lanza una tecla de verdad con KeyboardEvent y el codigo que ya habia hace el
+resto. Por eso el menu es autosuficiente y no toca el motor: se puede montar
+en cualquier pantalla sin que ningun modulo sepa que existe.
 
-Las cuatro rectas mandan. Si hay alguna pulsada, la diagonal sale de combinar
-las que haya y las banderas con nombre no se suman. Solo si no hay ninguna
-recta se mira si hay una diagonal con nombre puesta, que cubre el control que
-solo sepa dar diagonales.
+Va en el document.body y no dentro de la pantalla de carga, a proposito: si
+viviera dentro, moriria con ella y habria que reabrirlo en cada combate.
 
-Asi el resultado no depende de COMO se pulso: dos dedos en arriba e izquierda,
-o una sola bandera `upLeft`, dan el mismo vector.
+DOS FALLOS QUE SALIERON Y COMO SE QUEDARON
 
-31 comprobaciones. Suite completa en verde.
+El primero: el diagnostico contaba `entities.length` por variable de este
+fichero. `entities` se declara mas abajo con const, asi que al pintarse el
+panel aun estaba en zona muerta, tiraba la excepcion y el panel salia VACIO.
+Ni una fila. De esos fallos que parecen "el menu va vacio" y en realidad son
+un ReferenceError. Ahora todo se lee por window.SANPABLERA.
 
-LO QUE ESTO NO ABRE
+El segundo, y este lo arreglo tambien: el diagnostico se ejecuta suelto, con
+try. Un panel de diagnostico que se rompe justo cuando hay algo raro que
+diagnosticar es PEOR que no tenerlo, porque se ve vacio y no dice por que. Si
+la funcion que le pasan falla, el panel lo enseña y sigue teniendo botones.
 
-De los once puntos que pediste, este es el primero. Quedan el dev menu en la
-inicial, los cuadros de luchadores mas pequenos con dos filas bajo el mapa, la
-cuadricula de escenarios con miniatura, el mapeo de bluetooth, y las siluetas
-de golpe nuevas. Y sigue abierta una limitacion real de controles que se ha
-quedado documentada al mirar el codigo: `InputMapper` reserva ATAQUE_LIGERO +
-ATAQUE_PESADO a la vez como COMBO (linea 116), asi que con dos botones de
-golpe el unico uso de pulsarlos juntos es el especial, no dos ataques.
+LO QUE NO FUNCIONA TODAVIA
+
+El boton de "Controles" NO abre la pantalla de controles. El de "Inspector" no
+se ha comprobado. El launcher de tecla con KeyboardEvent sintetico no basta
+para el camino que usa el motor, o el F1 exige algo mas. Queda pendiente.
+
+El boton de ENTRENAR avisa de que no esta conectado, en vez de fingir. El
+entrenamiento es un fichero entero mas y aqui no cabe entero.
