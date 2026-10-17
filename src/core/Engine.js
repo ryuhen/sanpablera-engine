@@ -175,11 +175,14 @@ const devMenu = new DevMenu({
         // y el panel salia VACIO. El boton pulsaba, el panel se abria, y no
         // habia ni una fila: de esos fallos que parecen "el menu va vacio".
         const sp = window.SANPABLERA || {};
-        const fs = sp.fighters || [];
+        const fs = Array.isArray(sp.fighters) ? sp.fighters : [];
         const conMalla = fs.find(f => f && f.model);
+        const rig = conMalla && conMalla.model ? conMalla.model.rig : null;
         return {
-            modelo: conMalla ? MODELO_URL.split('/').pop() : 'cargando...',
-            huesos: conMalla && conMalla.model.rig ? conMalla.model.rig.bones.length : null,
+            modelo: conMalla
+                ? MODELO_URL.split('/').pop()
+                : (fs.length ? 'sin malla todavia' : 'cargando...'),
+            huesos: rig && rig.bones ? rig.bones.length : null,
             peleadores: (sp.entities || []).length
         };
     }
@@ -1202,6 +1205,14 @@ window.SANPABLERA = { engine, scene, camera, fighters, entities, world, inputMap
 // final de boot):
 window.SANPABLERA.getInspector = () => inspector;
 window.SANPABLERA.getRouter = () => (ui ? ui.router : null);
+
+// NOTA sobre el reparto de `window.SANPABLERA`. El objeto se REASIGNA entero
+// dentro de `boot()`, y `boot()` es quien llama a `arrancar()`, asi que lo que
+// cuelgue de `arrancar()` (las dos `abrirX`, lineas 897-898) se cuelga DESPUES
+// del reparto y sobrevive. Ponerlo aqui en ambito de modulo no solo es
+// redundante: `abrirInspector` es un `const` anidado en `arrancar()` y aqui no
+// existe, asi que daria ReferenceError al cargar el motor. Y `node --check` no
+// lo ve, porque el ambito se resuelve en ejecucion, no al analizar.
 
 // El almacen de clips grabados, para poder preguntar que hay y que falta sin
 // abrir la consola. `clips()` devuelve el resumen; `clipDe(nombre)` la pose.
