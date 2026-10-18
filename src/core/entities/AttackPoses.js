@@ -497,6 +497,25 @@ export const MOVE_POSES = Object.freeze({
 export const ORIGEN = Object.freeze({ GOLPE: 'GOLPE', FAMILIA: 'FAMILIA' });
 
 /**
+ * Cuantos golpes comparten esta animacion, y cuales son.
+ *
+ * ESTE NUMERO ES EL PROBLEMA, VISTO DE CARA
+ *   El editor lo enseña al lado del interruptor porque es lo que el autor
+ *   necesita para decidir: "muevo este slider" no dice nada de lo que va a
+ *   pasar, "mueve 19 golpes" si. Y al verlo, el problema deja de ser una queja
+ *   ("las animaciones estan raras") y pasa a ser un numero que se puede atacar.
+ *
+ *   El calculo sale de `MOVE_SILHOUETTES`, asi que no puede quedarse viejo: si
+ *   manana hay 20 jabs, aqui dira 20.
+ *
+ * @param {string} familia
+ * @returns {Array<string>}  los golpes, en el orden de la tabla
+ */
+export function golpesDeLaFamilia(familia) {
+    return Object.keys(MOVE_SILHOUETTES).filter(k => MOVE_SILHOUETTES[k] === familia);
+}
+
+/**
  * De donde viene la silueta de este golpe en este contexto.
  *
  * ES LO QUE PERMITE ELEGIR "TRABAJO EL GESTO" O "TRABAJO LA FAMILIA"

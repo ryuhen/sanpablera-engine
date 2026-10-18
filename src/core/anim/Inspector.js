@@ -48,7 +48,7 @@
  */
 
 import * as Overrides from './Overrides.js';
-import { liveSilhouettes, silhouetteOf } from '../entities/AttackPoses.js';
+import { liveSilhouettes, silhouetteOf, liveMoves, origenDe, sembrarGesto, golpesDeLaFamilia } from '../entities/AttackPoses.js';
 import {
     liveReactions, groundAttackPose, wakeupPose
 } from '../entities/HitReactions.js';
@@ -282,6 +282,54 @@ export function alcanceDe(state, objetivo, alcance) {
  * La parte de la tabla que se esta viendo, con su prefijo. Null si la vista no
  * tiene numeros (WAKEUP y los golpes de suelo se ajustan por codigo).
  */
+export /**
+ * La fila cuando se edita TODA LA FAMILIA. Lo de siempre.
+ *
+ * @param {object} sil  la silueta de la familia
+ * @param {string} ctx  STAND | CROUCH | AIR | DOWN
+ * @param {string} familia
+ */
+function filaDeLaFamilia(sil, ctx, familia) {
+    return {
+        tabla: 'ATTACK_SILHOUETTES.' + familia + '.' + ctx,
+        raiz: sil[ctx],
+        ambito: 'FAMILIA',
+        nota: 'moves TODO lo que use la familia ' + familia + '. '
+            + 'la extension de la vista depende tambien de ATTACK_BASES.' + ctx
+    };
+}
+
+/**
+ * La fila cuando se edita UN SOLO GOLPE.
+ *
+ * `raiz` cae a la familia mientras el golpe no tenga gesto propio. Es lo que
+ * hace que el interruptor sea HONESTO: al pasar a "este golpe" ves los mismos
+ * numeros que veias en la familia, y en cuanto mueves un slider el golpe se
+ * aparta. Si `raiz` fuese `undefined` los sliders saldrian en cero, y ajustar
+ * un cero es inventar un gesto entero desde una pantalla que dice "estas
+ * editando el jab".
+ *
+ * @param {object} view  la vista, de la que sale el golpe
+ * @param {object} sil   la silueta de su familia
+ * @param {string} ctx
+ * @param {string} familia
+ */
+function filaDelGolpe(view, sil, ctx, familia) {
+    const moveKey = view.moveKey || view.family;
+    const propios = liveMoves()[moveKey];
+    const raiz = (propios && (propios[ctx] || propios.STAND)) || sil[ctx];
+    const suyo = !!(propios && (propios[ctx] || propios.STAND));
+    return {
+        tabla: 'MOVE_POSES.' + moveKey + '.' + ctx,
+        raiz,
+        ambito: 'GOLPE',
+        nota: suyo
+            ? 'mueve SOLO ' + moveKey + '. El resto sigue en la familia ' + familia + '.'
+            : moveKey + ' todavia no tiene gesto propio: sale de la familia ' + familia
+                + '. Mueve un slider y se aparta.'
+    };
+}
+
 export function filaDeLaVista(view) {
     if (view.kind === 'ATTACK') {
         const T = liveSilhouettes();
@@ -293,6 +341,25 @@ export function filaDeLaVista(view) {
         const familia = T[view.family] ? view.family : 'JAB';
         const sil = T[familia];
         const ctx = sil[view.context] ? view.context : 'STAND';
+
+        // --- EL AMBITO: ESTE GOLPE O TODA LA FAMILIA ----------------------
+        //
+        // Este es EL interruptor que hace falta, y va aqui, en la composicion
+        // de la ruta, que es el unico sitio donde se decide donde se guarda un
+        // numero. No en la pantalla: en la pantalla seria un adorno.
+        //
+        //   FAMILIA -> `ATTACK_SILHOUETTES.<familia>.<ctx>`  (lo de siempre:
+        //             mover un slider mueve los 19 jabs, y dice que lo hace)
+        //   GOLPE   -> `MOVE_POSES.<moveKey>.<ctx>`          (solo este golpe)
+        //
+        // Y el `raiz` de donde se leen los sliders va con la MISMA ruta. Si
+        // apuntaran a tablas distintas habria el bug mas caro que ha tenido
+        // este panel otra vez: el slider marcaria un numero, al moverlo se
+        // guardaria en un sitio, y el motor leeria de otro.
+        const fila = (view.scope === 'GOLPE')
+            ? filaDelGolpe(view, sil, ctx, familia)
+            : filaDeLaFamilia(sil, ctx, familia);
+
         return {
             // EL PREFIJO COMPLETO DE LA RUTA, NO SOLO EL NOMBRE DE LA TABLA.
             //
@@ -312,12 +379,12 @@ export function filaDeLaVista(view) {
             // aplicaba porque su ruta y la del inspector acababan en el mismo
             // sitio por caminos distintos. Mover un slider se veia; mover el
             // siguiente lo hacia perder.
-            tabla: 'ATTACK_SILHOUETTES.' + familia + '.' + ctx,
-            raiz: sil[ctx],
-            nota: 'la extension de la vista depende tambien de ' +
-                'ATTACK_BASES.' + ctx
+            tabla: fila.tabla,
+            raiz: fila.raiz,
+            nota: fila.nota
         };
     }
+
     if (view.kind === 'REACTION') {
         const T = liveReactions();
         const altura = T[view.height] ? view.height : 'MEDIO';
@@ -624,6 +691,64 @@ export class AnimInspector {
         }
     }
 
+      /**
+     * El interruptor GOLPE / FAMILIA, con las consecuencias escritas debajo.
+     *
+     * POR QUE AVISA DEL RECUENTO Y NO SOLO DE LA ELECCION
+     *   "Muevo este slider" no dice nada de lo que va a pasar. "Mueve 19
+     *   golpes" si. Al autor no le importa un interruptor: le importa saber a
+     *   quien va a arrastrar. Por eso el boton lleva el numero de golpes
+     *   afectados, y ese numero sale de la tabla, no esta escrito.
+     */
+    _interruptorAmbito(v) {
+        const caja = document.createElement('div');
+        caja.className = 'spf-insp-ambito';
+
+        const losMios = origenDe(v.moveKey, v.context).origen === 'GOLPE';
+        const comparten = golpesDeLaFamilia(v.family).length;
+
+        const btnGolpe = document.createElement('button');
+        btnGolpe.type = 'button';
+        btnGolpe.textContent = 'Solo ' + v.moveKey + (losMios ? '' : ' (nuevo)');
+        btnGolpe.className = v.scope === 'GOLPE' ? 'on' : '';
+        btnGolpe.title = 'Mueve solo este golpe. Los demas no se enteran.';
+        btnGolpe.addEventListener('click', () => {
+            if (v.scope === 'GOLPE') return;
+            // Al pasar a GOLPE se SIEMBRA desde la familia. `writePath` no crea
+            // hermanos, asi que ajustar sin sembrar deja la entrada a medias y el
+            // motor no sabe de donde sale cada numero. Sembrando, el primer
+            // numero que se mueva es una edicion, no una creacion desde cero.
+            sembrarGesto(v.moveKey);
+            v.scope = 'GOLPE';
+            this._pintar();
+        });
+
+        const btnFamilia = document.createElement('button');
+        btnFamilia.type = 'button';
+        btnFamilia.textContent = 'Familia ' + v.family + ' (' + comparten + ')';
+        btnFamilia.className = v.scope === 'GOLPE' ? '' : 'on';
+        btnFamilia.title = 'Mueve los ' + comparten + ' golpes que comparten esta animacion.';
+        btnFamilia.addEventListener('click', () => {
+            if (v.scope !== 'GOLPE') return;
+            v.scope = 'FAMILIA';
+            this._pintar();
+        });
+
+        caja.appendChild(btnGolpe);
+        caja.appendChild(btnFamilia);
+
+        const nota = document.createElement('p');
+        nota.className = 'spf-insp-nota';
+        nota.textContent = v.scope === 'GOLPE'
+            ? (losMios
+                ? 'Editando SOLO ' + v.moveKey + '. Los otros ' + (comparten - 1) + ' de la familia siguen como estaban.'
+                : 'Todavia copia la familia. En cuanto muevas un slider, ' + v.moveKey + ' se aparta y deja de ser un ' + v.family + '.')
+            : 'Editando la FAMILIA ' + v.family + ': los ' + comparten
+                + ' golpes que la comparten se mueven contigo. Para tocar uno solo, pulsa su boton.';
+        caja.appendChild(nota);
+        return caja;
+    }
+
     _copiarViejo(texto, fin) {
         const ta = document.createElement('textarea');
         ta.value = texto;
@@ -697,6 +822,15 @@ export class AnimInspector {
             });
             fila('CONTEXTO', CONTEXTS, v.context, (x) => { v.context = x; });
             fila('FASE', PHASES, v.phase, (x) => { v.phase = x; v.t = 1; });
+
+            // --- EL INTERRUPTOR: ESTE GOLPE O TODA LA FAMILIA --------------
+            //
+            // Va antes que nada de lo que mueve sliders, porque decide DONDE se
+            // guarda lo que muevas a partir de ahora. Y avisa de las
+            // consecuencias, que es lo que hace que la eleccion sea informada:
+            // cuantos golpes se mueven contigo, o si este ya tiene gesto
+            // propio.
+            cont.appendChild(this._interruptorAmbito(v));
             const sil = silhouetteOf(v.moveKey);
             if (sil !== v.family) {
                 cont.appendChild(this._aviso(
@@ -924,9 +1058,19 @@ export class AnimInspector {
 // CSS
 // ===========================================================================
 const CSS = `
-/* El panel va en el LATERAL IZQUIERDO, no a pantalla completa: la escena 3D
-   tiene que quedarse a la vista, que es el motivo de que exista. El fondo es
-   opaco solo en las columnas; el marco no lo es, para no cortar al luchador. */
+/* EL INTERRUPTOR DE AMBITO. Dos botones y su consecuencia escrita debajo.
+   El boton de la familia lleva el numero de golpes afectados, porque es eso
+   lo que el autor necesita para decidir, no un interruptor bonito. El activo
+   va en oro, el que esta apagado pero tiene algo que proteger (un golpe sin
+   gesto propio) lleva "nuevo" en el texto. */
+.spf-insp-ambito{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0 3px}
+.spf-insp-ambito button{flex:1 1 46%;background:#151a2b;color:#cfe0ff;
+ border:1px solid #3a5090;padding:6px 5px;cursor:pointer;font:700 10px/1.3 inherit;
+ letter-spacing:.4px;text-align:center}
+.spf-insp-ambito button:hover{background:#22325a;color:#fff}
+.spf-insp-ambito button.on{background:#ffd447;color:#141a2b;border-color:#7a1200}
+.spf-insp-nota{margin:2px 0 9px;font-size:10px;line-height:1.45;color:#93a6cc}
+
 .spf-insp{position:fixed;left:0;top:0;bottom:0;width:420px;z-index:130;
  display:flex;flex-direction:column;pointer-events:auto;
  background:rgba(9,11,17,.92);backdrop-filter:blur(2px);
