@@ -24,33 +24,19 @@
  *   unidades, a proposito: no se mezclan.
  *
  * LO QUE VA DE MAQUETA
- *   Este es el hueco donde luego iran los clips de animacion y las reglas del
- *   juego, cambiando de tip cada cinco segundos. La estructura ya esta preparada
- *   (una tarjeta, un dibujo arriba, un texto abajo con dos lineas) y el contenu
- *   es lo primero que se cambia. `TIPS` esta vacio a proposito: no se inventa un
- *   tip que luego haya que quitar, y la funcion que lo recorreria ya esta.
+ *   Este es el hueco donde luego iran los clips de animacion, cambiando de tip
+ *   cada cinco segundos. Los tips NO estan aqui: viven en `core/Tips.js`, que es
+ *   puro y probado, y sus numeros salen de las tablas en el momento de importar.
+ *   Un tip con un numero escrito a mano se queda viejo sin avisar; uno que se
+ *   calcula no puede.
  */
 import { MARGARITA, camino, proyectar } from '../core/geo/venezuela.js';
+import { TIPS, CADA_TIP, tip } from '../core/Tips.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
 /** Recuadro de la foto dentro de la tarjeta. */
 const FOTO = { x: 4.2, y: 4.2, w: 91.6, h: 43 };
-
-/**
- * LOS TIPS. VACIO A PROPOSITO.
- *
- * El plan es que aqui roten las reglas y los clips, uno cada cinco segundos.
- * No se escriben todavia porque un tip inventado es contenido falso que alguien
- * tendra que quitar cuando llegue el real, y porque la lista crece sola: cada
- * regla que se escriba en el motor es un tip mas.
- *
- * @type {Array<{titulo:string, texto:string}>}
- */
-export const TIPS = Object.freeze([]);
-
-/** Cada cuanto cambia. En milisegundos. */
-export const CADA_TIP = 5000;
 
 function el(nombre, attrs, ...hijos) {
     const n = document.createElementNS(NS, nombre);
@@ -214,7 +200,7 @@ function construir(opts) {
         ? (destino.fundacion.length > 62
             ? destino.fundacion.slice(0, 60).trim() + '\u2026'
             : destino.fundacion)
-        : (TIPS[0] ? TIPS[0].titulo : 'La isla esta en la costa norte, entre el mar y la montaña.');
+        : tip(0).texto;
     svg.appendChild(nota);
 
     caja.appendChild(svg);
