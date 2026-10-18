@@ -43,7 +43,7 @@ import { createPose, setEuler, setPos, clonePose, addPose } from '../cine/Pose.j
 import { fk, solveTwoBone, placeFoot } from '../cine/Rig.js';
 import { footTargets } from '../cine/Stances.js';
 import { clamp01, lerp, ease } from '../cine/Math3.js';
-import { registerTable, merge, deepFreeze } from '../anim/Overrides.js';
+import { registerTable, merge, deepFreeze, setOverride } from '../anim/Overrides.js';
 
 // ===========================================================================
 // LAS CUATRO BASES
@@ -448,6 +448,189 @@ export const MOVE_SILHOUETTES = Object.freeze({
 });
 
 /** La silueta de un golpe: la que declara el moveset, o la de la tabla. */
+/**
+ * ===========================================================================
+ * LA CAPA POR GOLPE: QUE UN GESTO NO HEREDE DE SU FAMILIA
+ * ===========================================================================
+ *
+ * EL PROBLEMA QUE ESTA TABLA RESUELVE
+ *   `MOVE_SILHOUETTES` reparte 69 golpes entre 10 familias, y hay 19 jabs, 14
+ *   patadas y 9 ganchos. Un costillazo, una sumision y el especial se animan
+ *   EXACTAMENTE igual porque los tres son `JAB`; y `PUNO_IZQUIERDO` y
+ *   `PUNO_DERECHO` son el mismo dato. No es que las animaciones esten mal
+ *   afinadas: es que son la MISMA, y el jugador ve el mismo gesto donde
+ *   esperaba cuatro.
+ *
+ *   Con eso, un editor por familia es peor que inútil: ajustar `JAB` mueve los
+ *   19 jabs a la vez. Por eso esta capa existe ANTES que el editor.
+ *
+ * LA REGLA, Y ES UNA REGLA Y NO UNA MEZCLA
+ *   Si un golpe tiene aqui su propia silueta para un contexto, ESA manda y
+ *   punto: no se le mezcla la de la familia. Si no la tiene, se hereda igual
+ *   que hasta ahora.
+ *
+ *   Podria haberse hecho una mezcla campo a campo, y es lo que se suele hacer.
+ *   Aqui no, a proposito: mezclar significaria que ajustar el codo de un golpe
+ *   puede moverle la cadera que heredaba, y el autor no sabria de donde sale
+ *   cada numero. Con sustitucion entera, lo que ves es lo que escribiste, y
+ *   `origenDe()` dice de donde. Un editor de animaciones tiene que poder
+ *   explicar el numero que estas viendo; si no puede, es una caja negra con
+ *   sliders.
+ *
+ * POR QUE VACIA
+ *   Vacia significa que hoy el juego se comporta IGUAL que antes, byte a byte.
+ *   Esto no arregla ni un golpe por si solo: abre la puerta. Los golpes que
+ *   tengan gesto propio se anaden aqui, uno a uno, y se pueden ver uno al lado
+ *   del otro sin tocar los demas.
+ */
+export const MOVE_POSES = Object.freeze({
+    // Ejemplo commented, NO activo, para que la forma se vea sin ensuciar el
+    // juego: un costillazo de verdad deberia traer el codo atras y el torso
+    // girado, no el brazo del jab. Se activa escribiendo la entrada.
+    //
+    // COSTILLAZO: Object.freeze({
+    //     STAND: Object.freeze({ ... })
+    // })
+});
+
+/** De donde sale la pose de un golpe en un contexto: el, o su familia. */
+export const ORIGEN = Object.freeze({ GOLPE: 'GOLPE', FAMILIA: 'FAMILIA' });
+
+/**
+ * De donde viene la silueta de este golpe en este contexto.
+ *
+ * ES LO QUE PERMITE ELEGIR "TRABAJO EL GESTO" O "TRABAJO LA FAMILIA"
+ *   Sin esto el editor no puede honestamente ofrecer las dos cosas: si no se
+ *   sabe de donde sale una pose, la unica opcion honesta es editarla donde
+ *   esta, y el autor acaba moviendo 19 golpes sin querer.
+ *
+ * @param {string} moveKey
+ * @param {string} [contexto]
+ * @returns {{origen:string, familia:string, gesto:string|null}}
+ */
+/**
+ * Los campos que `attackPoseFor` lee SIN comprobar antes de poder dibujar.
+ *
+ * POR QUE SON ESTOS Y NO "LA PIEZA ENTERA"
+ *   La primera version pedia `base, armL, armR, legL y legR` completos, y el
+ *   motor rechazaba siluetas VALIDAS: el generador envuelve cada miembro en su
+ *   propio `if (S.armL)`, asi que un golpe con un solo brazo se genera bien.
+ *   La guarda estaba protegiendo de un fallo imposible y, de paso, impediendo
+ *   escribir gestos a medias, que es justo lo que se va a hacer.
+ *
+ *   La segunda version pedia solo `base`, y seguia reventando. El motivo es que
+ *   `writePath` NO rellena hermanos: al escribir
+ *   `MOVE_POSES.COSTILLAZO.STAND.base.hip` crea `base` con UNA clave, y el
+ *   generador lee `S.base.pitch` y `S.base.twist` sin comprobar. Menos mal que
+ *   el `try/catch` de la prueba lo enseño en vez de dejarlo pasar: un
+ *   `undefined` en un giro no peta, sale `NaN`, y un `NaN` en el torso se ve
+ *   como "el golpe va raro" tres commits mas tarde.
+ *
+ * O sea que la condicion minima es la que de verdad se lee sin comprobar, y
+ * los miembros opcionales se dejan a `if (S.armL)` porque esos si estan
+ * protegidos.
+ */
+const PIEZAS = ['base.hip', 'base.pitch', 'base.twist'];
+
+/**
+ * De donde viene la silueta de este golpe en este contexto.
+ *
+ * QUE HACE ESTA FUNCION Y POR QUE TIENE UNA COMPROBACION DENTRO
+ *   Dice de donde sale la pose, y sobre todo decide si un gesto propio esta
+ *   ESCRITO o solo EMPEZADO.
+ *
+ *   Eso no es un detalle. Al escribir un override sobre
+ *   `MOVE_POSES.COSTILLAZO.STAND.base.hip`, `writePath` crea el camino que
+ *   falta: queda `COSTILLAZO.STAND.base.hip` y **nada mas**. Sin `armL`. Y
+ *   como la regla es "el gesto propio sustituye ENTERO a la familia", el
+ *   motor se encuentra con un `S` al que le falta el brazo y revienta con
+ *   `Cannot read properties of undefined (reading 'startup')`.
+ *
+ *   O sea: el autor mueve un slider y el juego peta. El peor sitio posible para
+ *   un fallo, porque el autor no ha hecho nada malo: ha empezado a escribir.
+ *
+ *   Asi que un gesto se considera escrito solo si tiene las cinco piezas que
+ *   el generador va a leer. Si le falta alguna, se avisa POR CONSOLA y se
+ *   sigue heredando de la familia, que es lo que el autor quiere de mientras.
+ *   Es mejordater la familia a medias que romper el combate.
+ *
+ * @param {string} moveKey
+ * @param {string} [contexto]
+ * @param {object} [TABLE]  la tabla YA con parches (`liveMoves()`)
+ * @returns {{origen:string, familia:string, gesto:object|null, incompleto:boolean}}
+ */
+export function origenDe(moveKey, contexto = 'STAND', TABLE) {
+    const familia = MOVE_SILHOUETTES[moveKey] || 'JAB';
+    // `merge()` puede devolver null si la tabla no esta registrada todavia o no
+    // tiene nada que parchear. Un `null[moveKey]` revienta con "Cannot read
+    // properties of null", que no dice nada sobre el golpe que estas editando.
+    const propio = (TABLE || liveMoves() || {})[moveKey];
+    const bruto = propio ? (propio[contexto] || propio.STAND || null) : null;
+    if (!bruto) {
+        return { origen: ORIGEN.FAMILIA, familia, gesto: null, incompleto: false };
+    }
+    const faltan = PIEZAS.filter(p => {
+        const [a, b] = p.split('.');
+        return !bruto[a] || bruto[a][b] === undefined;
+    });
+    if (faltan.length) {
+        console.warn('[gesto] ' + moveKey + ' esta a medias, le faltan ' + faltan.join(', ')
+            + '. Se sigue usando la familia ' + familia + ' hasta que este entero.');
+        return { origen: ORIGEN.FAMILIA, familia, gesto: null, incompleto: true };
+    }
+    return { origen: ORIGEN.GOLPE, familia, gesto: bruto, incompleto: false };
+}
+
+/**
+ * Copia la silueta de la familia de este golpe dentro de `MOVE_POSES`, para
+ * poder ajustarla sin perder de donde venia.
+ *
+ * POR QUE HACE FALTA Y NO BASTA CON ESCRIBIR UN NUMERO
+ *   `writePath` NO crea hermanos. Al escribir
+ *   `MOVE_POSES.COSTILLAZO.STAND.base.hip` sobre una tabla VACIA deja
+ *   `base: { hip: 0.33 }` y nada mas: ni `pitch`, ni `twist`, ni brazos. Y como
+ *   el generador lee `base.pitch` sin comprobar, el combate se rompia.
+ *
+ *   O sea que **no se puede inventar un gesto desde cero con un slider**. Hay
+ *   que empezar copiando la familia y ajustar encima. Lo cual, dicho al reves,
+ *   es exactamente el flujo que quiere un autor: "parto de lo que hay y lo
+ *   cambio", no "escribo 30 numeros en un formulario".
+ *
+ * @param {string} moveKey
+ * @param {string} [contexto]  por defecto todos los que la familia declare
+ * @returns {number}  cuantos numeros se han copiado
+ */
+export function sembrarGesto(moveKey, contexto) {
+    const familia = MOVE_SILHOUETTES[moveKey] || 'JAB';
+    const sil = (merge('ATTACK_SILHOUETTES')[familia] || ATTACK_SILHOUETTES[familia]);
+    if (!sil) return 0;
+    const ctxs = contexto ? [contexto] : Object.keys(sil);
+    let n = 0;
+    for (const ctx of ctxs) {
+        const S = sil[ctx];
+        if (!S) continue;
+        for (const ruta of numericPaths(S)) {
+            const v = ruta.split('.').reduce((o, k) => (o == null ? o : o[k]), S);
+            setOverride('MOVE_POSES.' + moveKey + '.' + ctx + '.' + ruta, v);
+            n++;
+        }
+    }
+    return n;
+}
+
+/** Las hojas numericas de un objeto, como rutas con puntos. */
+function numericPaths(o, pre = '', out = []) {
+    if (!o || typeof o !== 'object') return out;
+    for (const k of Object.keys(o)) {
+        const v = o[k];
+        const r = pre ? pre + '.' + k : k;
+        if (typeof v === 'number') out.push(r);
+        else if (Array.isArray(v)) v.forEach((x, i) => out.push(r + '.' + i));
+        else if (v && typeof v === 'object') numericPaths(v, r, out);
+    }
+    return out;
+}
+
 export function silhouetteOf(moveKey, declared) {
     if (declared && ATTACK_SILHOUETTES[declared]) return declared;
     return MOVE_SILHOUETTES[moveKey] || 'JAB';
@@ -478,8 +661,29 @@ export function liveBases(TABLE) {
     return TABLE || merge('ATTACK_BASES');
 }
 
+/**
+ * La capa por golpe CON los overrides puestos.
+ *
+ * POR QUE HACE FALTA Y POR QUE NO BASTA CON LEER `MOVE_POSES`
+ *   `MOVE_POSES` es la tabla ORIGINAL, y la original nunca se toca: lo que se
+ *   guarda va en el parche y sale por `merge()`. Si `origenDe` leyera la
+ *   original, pondrias un override sobre `MOVE_POSES.COSTILLAZO...`, lo
+ *   veras mover en el inspector, y el combate seguiria usando la tabla vieja.
+ *   Ese es el peor fallo posible en un editor: el control responde y no cambia
+ *   nada, y el autor se va a buscar el problema al sitio equivocado.
+ */
+export function liveMoves(TABLE) {
+    return TABLE || merge('MOVE_POSES');
+}
+
 registerTable('ATTACK_SILHOUETTES', deepFreeze(ATTACK_SILHOUETTES));
 registerTable('ATTACK_BASES', deepFreeze(ATTACK_BASES));
+// La capa por golpe se registra como UNA TABELA MAS, y no como una excepcion
+// dentro de `liveSilhouettes()`. Motivo: asi el inspector la recorre con el
+// mismo mecanismo que las otras dos, y un override sobre
+// `MOVE_POSES.COSTILLAZO.STAND.armL` se guarda y se lee sin que haya que
+// escribir un segundo sistema de parches. Un solo camino para las tres tablas.
+registerTable('MOVE_POSES', deepFreeze(MOVE_POSES));
 
 // Lo que se registra es la tabla YA CONGELADA EN PROFUNDO. Sin esto, los arrays
 // de dentro (`armL.active`, `base.hip`...) siguen siendo escribibles: `freeze`
@@ -539,7 +743,17 @@ export function attackPoseFor(rig, moveKey, context, phase, t, opts = {}) {
     const ctx = bases[context] || bases.STAND;
     const silName = silhouetteOf(moveKey, opts.silhouette);
     const sil = siluetas[silName] || siluetas.JAB;
-    const S = sil[context] || sil.STAND;
+    // --- LA CAPA POR GOLPE, Y POR QUE SE LEE DESPUES DE LA FAMILIA -------
+    // La familia se lee siempre (es el defecto) y el gesto propio, si existe,
+    // la pisa ENTERA. Se lee aqui y no en `silhouetteOf` porque
+    // `silhouetteOf` devuelve un NOMBRE de familia y esta capa devuelve una
+    // silueta completa: si se mezclaran las dos cosas, la firma diria una cosa
+    // y haria otra.
+    //
+    // Con la tabla vacia, `gestoPropio` es null y esto es exactamente lo de
+    // antes. Eso es lo que comprueba la prueba de equivalencia.
+    const propio = origenDe(moveKey, context, opts.moves).gesto;
+    const S = propio || sil[context] || sil.STAND;
     const tt = clamp01(t);
 
     // --- 1. base: la postura ya resuelta, o la del contexto --------------
