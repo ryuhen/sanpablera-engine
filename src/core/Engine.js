@@ -56,6 +56,15 @@ import { StaminaGauge } from './combat/Stamina.js';
 import SPF from './fsm/Constants.js';
 import { fullRoster } from './roster.js';
 import { STAGES } from './stages.js';
+import ModeSelect from '../ui/ModeSelect.js';
+import SessionPanel from '../ui/SessionPanel.js';
+import {
+    createSession, registrarKO, tickSesion, textoCampana, lineaHUD,
+    serializeSession, MODO as MODO_SESION
+} from './modes/session.js';
+import { buildDioramaData, aPaleta } from './geo/diorama.js';
+import { createDiorama } from '../render/Diorama.js';
+import { applyCelShading } from '../render/ToonMaterial.js';
 
 // Constants.js expone el namespace SPF como export por defecto (no hay
 // exports con nombre), asi que Intent se saca de ahi.
@@ -147,10 +156,10 @@ const loading = new LoadingScreen({
     title: 'SANPABLERA',
     subtitle: 'MOTOR DE LUCHA',
     // El destino que se anuncia en la postal. Con el torneo sin empezar,
-    // `siguiente({})` da el PRIMER lugar, que es Playa del Agua: el sitio por
-    // el que entra todo el mundo. No es un adorno ni un texto fijo: sale de la
-    // misma tabla que despues gobierna el mapa, asi que la postal no puede
-    // prometer un sitio al que el torneo no llegue.
+    // `siguiente({})` da el PRIMER lugar de la ruta (hoy El Morro): el sitio
+    // por el que entra todo el mundo. No es un adorno ni un texto fijo: sale
+    // de la misma tabla que despues gobierna el mapa, asi que la postal no
+    // puede prometer un sitio al que el torneo no llegue.
     destino: (() => {
         try {
             const s = siguiente({});
@@ -406,6 +415,22 @@ function makeFighter(slot, side) {
 
 const fighters = [];
 
+// ---------------------------------------------------------------------------
+// MODOS DE LA BIBLIA (§2, §6 y §7)
+// ---------------------------------------------------------------------------
+// La sesion guarda monedero, cuadro de Royale y campana del Cuarteto. Las
+// decisiones (cuanto paga un KO, cuando avanza un ciclo) viven en core/modes,
+// que se testea en Node; aqui solo se conectan con el bucle y la camara.
+let sesion = null;
+let celShaderReal = false;
+let datosDiorama = null;
+let diorama = null;
+/** Vista de la maqueta que manda en la camara mientras se elige hito. */
+let camaraMaqueta = null;
+/** Mientras es true el combate esta congelado y se esta mirando la isla. */
+let enMaqueta = false;
+let panelModo = null;
+
 /**
  * Da color a un peleador. El .glb del mannequin trae su propio material y
  * un solo color para los dos peleadores seria ilegible en combate.
@@ -436,6 +461,170 @@ function applyStageTheme(stage) {
     mat.material.diffuseColor = B.Color3.FromHexString(stage.mat);
     railMat.diffuseColor = B.Color3.FromHexString(stage.rail);
     hemi.groundColor.copyFrom(B.Color3.FromHexString(stage.wall));
+}
+
+/**
+ * Colorea el ring con la paleta de la zona de la maqueta. Se aplica a los
+ * materiales normales del suelo, NO a los peleadores: estos ya llevan material
+ * toon (ShaderMaterial), que no tiene `.diffuseColor`.
+ */
+function applyDioramaPalette(paleta) {
+    if (!paleta) return;
+    ground.material.diffuseColor = B.Color3.FromHexString(paleta.suelo);
+    mat.material.diffuseColor = B.Color3.FromHexString(paleta.tatami);
+    railMat.diffuseColor = B.Color3.FromHexString(paleta.borde);
+}
+
+/**
+ * Cel-shading sobre las mallas de los GLB. Se llama DESPUES de `tint()`, para
+ * que el color del peleador gane al color que trae el modelo. El suelo sigue
+ * con StandardMaterial a proposito: `applyStageTheme` le escribe diffuseColor.
+ *
+ * @returns {boolean} true si Babylon trae ShaderMaterial (shader real)
+ */
+function applyFighterCelShading() {
+    const real = typeof B.ShaderMaterial === 'function';
+    for (const f of fighters) {
+        if (!f.model || !f.model.root || !f.model.root.getChildMeshes) continue;
+        const hex = hexOf(f.color);
+        applyCelShading(B, scene, f.model.root.getChildMeshes(), {
+            color: hex,
+            colorFor: () => hex,
+            prefijo: 'toon_' + f.name
+        });
+    }
+    return real;
+}
+
+/** Construye la isla en miniatura y senala el siguiente hito de la ruta. */
+function buildDiorama() {
+    datosDiorama = buildDioramaData({
+        ganados: sesion ? sesion.ganados : {}
+    });
+    diorama = createDiorama(B, scene, datosDiorama);
+    const hito = datosDiorama.hitos.find(h => h.siguiente) || datosDiorama.hitos[0];
+    if (hito) elegirHito(hito.id);
+    instalarPickDiorama();
+    return datosDiorama;
+}
+
+/** Enfoca un hito, pinta el ring con su zona y lo marca en la maqueta. */
+function elegirHito(id) {
+    if (!datosDiorama || !diorama) return null;
+    const hito = datosDiorama.hitos.find(h => h.id === id) || null;
+    if (!hito) return null;
+    diorama.highlight(id);
+    const zoom = diorama.zoomPara(id);
+    camaraMaqueta = {
+        target: new B.Vector3(zoom.target[0], zoom.target[1], zoom.target[2]),
+        radius: zoom.radius
+    };
+    applyDioramaPalette(aPaleta(hito));
+    if (sesion) sesion.lugar = id;
+    actualizarPanelModo();
+    return hito;
+}
+
+/** Click sobre un marcador de la maqueta (ademas de los botones del panel). */
+function instalarPickDiorama() {
+    canvas.addEventListener('pointerdown', (ev) => {
+        if (!enMaqueta || !diorama) return;
+        const rect = canvas.getBoundingClientRect();
+        const hit = scene.pick(ev.clientX - rect.left, ev.clientY - rect.top,
+            (m) => !!(m.metadata && m.metadata.hitoId));
+        if (!hit || !hit.hit || !hit.pickedPoint) return;
+        const hito = diorama.pick(hit.pickedPoint.x, hit.pickedPoint.z);
+        if (hito) elegirHito(hito.id);
+    });
+}
+
+/** Deja de mirar la maqueta y devuelve la camara a los peleadores. */
+function entrarAlRing() {
+    if (!enMaqueta) return;
+    enMaqueta = false;
+    camaraMaqueta = null;
+    if (diorama && diorama.root && diorama.root.setEnabled) diorama.root.setEnabled(false);
+    inputMapper.reset();
+    actualizarPanelModo();
+}
+
+/** Panel flotante con el estado de la sesion y, en la maqueta, los hitos. */
+function crearPanelModo() {
+    panelModo = new SessionPanel({
+        onHito: (id) => elegirHito(id),
+        onFight: entrarAlRing
+    });
+    panelModo.mount();
+    actualizarPanelModo();
+}
+
+function actualizarPanelModo() {
+    if (!panelModo) return;
+    panelModo.update({
+        hud: sesion ? lineaHUD(sesion) : '',
+        campana: sesion ? textoCampana(sesion) : '',
+        enMaqueta,
+        hitos: datosDiorama ? datosDiorama.hitos : []
+    });
+}
+
+/**
+ * Un KO en el ring se convierte en evento de sesion: Cobre, avance del cuadro
+ * de Royale o del ciclo del Cuarteto. Ademas recompone el duelo para que no se
+ * pelee con un peleador muerto.
+ */
+function sincronizarSesion() {
+    if (!sesion || sesion.fase !== 'ACTIVA' || enMaqueta) return;
+    // La economia mide rentas e inactividad en tiempo epoch (ms), no en
+    // milisegundos desde que cargo la pagina: el reloj de la pagina mentiria.
+    const ahora = Date.now();
+    tickSesion(sesion, ahora);
+
+    const vidas = {};
+    for (const e of entities) vidas[e.fighter.name] = e.fighter.health;
+    const evento = registrarKO(sesion, vidas, ahora, { lugar: sesion.lugar });
+    if (!evento) return;
+
+    console.log('[sesion] ' + JSON.stringify(evento));
+    try {
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('spf-sesion-v1', serializeSession(sesion));
+        }
+    } catch (err) {
+        // Modo privado o almacenamiento lleno: la partida sigue en memoria.
+        console.warn('[sesion] no se pudo guardar:', err);
+    }
+    if (sesion.fase === 'FINALIZADA') {
+        console.log('[sesion] campeon: ' + sesion.campeon);
+    } else {
+        // Un ciclo de campana puede cambiar de escenario: se pinta con la
+        // paleta de la zona que toca, la misma que usa la maqueta.
+        const id = sesion.campana && sesion.campana.lugar;
+        const hito = id && datosDiorama
+            ? datosDiorama.hitos.find(h => h.id === id) : null;
+        if (hito) applyDioramaPalette(aPaleta(hito));
+        reiniciarDuelo();
+    }
+    actualizarPanelModo();
+}
+
+/** Vida, posicion e inercia al punto de partida para el siguiente duelo. */
+function reiniciarDuelo() {
+    inputMapper.reset();
+    fighters.forEach((f, i) => {
+        const esquina = FIGHTER_CORNERS[i] || FIGHTER_CORNERS[0];
+        f.health = 100;
+        if (f.gauge && f.gauge.reset) f.gauge.reset(100);
+        f.x = esquina.x;
+        f.z = esquina.z;
+        f.facing = facingToward(f.x, f.z, -f.x, -f.z);
+        if (f.model && f.model.place) f.model.place(f.x, f.z, f.facing);
+    });
+    for (const e of entities) {
+        e.vx = 0;
+        e.vz = 0;
+        e.targetLock = false;
+    }
 }
 
 // ===========================================================================
@@ -716,9 +905,29 @@ async function boot() {
     //     jugador, con su nombre guardado en la maquina) ----
     const selection = await new SelectScreen({ roster: fullRoster() }).pick();
 
-    // --- Seleccion de escenario (libro de origami; solo 1 por ahora) -------
-    const { stage } = await new StageSelect({ stages: STAGES }).pick();
-    applyStageTheme(stage);
+    // --- Modo de juego (Biblia Apex Primal, secciones 6 y 7) --------------
+    const { modo } = await new ModeSelect().pick();
+
+    // El lugar inicial sale de la misma tabla que el mapa. En la maqueta se
+    // sustituye por el hito que elija el jugador al tocar un marcador.
+    const primerLugar = siguiente({});
+    sesion = createSession({
+        modo,
+        jugadores: FIGHTER_CORNERS.map(c => c.name),
+        lugar: primerLugar ? primerLugar.id : null,
+        seed: 7,
+        now: Date.now()
+    });
+
+    if (modo === MODO_SESION.DIORAMA) {
+        // La maqueta SUSTITUYE al libro de origami: se elige hito en la isla y
+        // el ring se pinta con la paleta de la zona elegida.
+        enMaqueta = true;
+        buildDiorama();
+    } else {
+        const { stage } = await new StageSelect({ stages: STAGES }).pick();
+        applyStageTheme(stage);
+    }
 
     // --- Peleadores: se crean con la eleccion del jugador ------------------
     fighters.push(makeFighter(selection.p1, 0));
@@ -747,6 +956,12 @@ async function boot() {
         // Cada peleador en su esquina, mirando al centro.
         f.model.place(f.x, f.z, f.facing);
     }
+
+    // --- Cel-shading de novela grafica (Biblia §2) -------------------------
+    // Va despues de teñir y antes del primer frame. Los materiales toon leen la
+    // normal contra la luz y recortan a tres tonos; si Babylon no trae
+    // ShaderMaterial el modulo cae a StandardMaterial y el juego sigue andando.
+    celShaderReal = applyFighterCelShading();
 
     // --- Las animaciones grabadas ------------------------------------------
     //
@@ -829,6 +1044,9 @@ async function boot() {
             stamina: f.gauge.value
         }))
     });
+
+    // Estado del modo (Cobre, ciclo, hitos de la maqueta) en pantalla.
+    crearPanelModo();
 
     // --- INSPECTOR DE ANIMACIONES (F2) ------------------------------------
     //
@@ -940,6 +1158,14 @@ async function boot() {
  * En modo target el enfoque aprieta.
  */
 function fitCamera(dt) {
+    // En la maqueta manda el zoom del hito. Sin esto, el encuadre de combate
+    // reapuntaria a los peleadores cada frame y la isla desapareceria.
+    if (camaraMaqueta) {
+        camera.setTarget(camaraMaqueta.target);
+        camera.radius += (camaraMaqueta.radius - camera.radius) * (1 - Math.exp(-dt * 3));
+        return;
+    }
+
     const alive = entities.filter(e => e.model);
     if (alive.length < 2) return;
 
@@ -1121,6 +1347,16 @@ function render() {
         return;
     }
 
+    // --- Maqueta del Caribe ---------------------------------------------
+    // Mientras se elige hito el combate NO avanza. La camara sigue viva para
+    // que el zoom al marcador se vea suave; al pulsar PELEAR se libera.
+    if (enMaqueta) {
+        fitCamera(dt);
+        if (hud) hud.tick(dt);
+        scene.render();
+        return;
+    }
+
     // --- Input (una lectura por frame) ----------------------------------
     const cam = cameraGroundBasis();
     const player = entities[0];
@@ -1195,6 +1431,9 @@ function render() {
         }
     }
 
+    // Un KO aqui se convierte en Cobre / avance de cuadro / ciclo de historia.
+    sincronizarSesion();
+
     fitCamera(dt);
     scene.render();
 
@@ -1221,6 +1460,17 @@ window.SANPABLERA = { engine, scene, camera, fighters, entities, world, inputMap
 // final de boot):
 window.SANPABLERA.getInspector = () => inspector;
 window.SANPABLERA.getRouter = () => (ui ? ui.router : null);
+
+// Modos de la Biblia: sesion, maqueta y diagnostico del cel-shading.
+window.SANPABLERA.getSesion = () => sesion;
+window.SANPABLERA.getDiorama = () => diorama;
+window.SANPABLERA.elegirHito = (id) => elegirHito(id);
+window.SANPABLERA.entrarAlRing = entrarAlRing;
+window.SANPABLERA.textoSesion = () => ({
+    hud: lineaHUD(sesion),
+    campana: textoCampana(sesion),
+    celShading: celShaderReal ? 'shader' : 'fallback'
+});
 
 // NOTA sobre el reparto de `window.SANPABLERA`. El objeto se REASIGNA entero
 // dentro de `boot()`, y `boot()` es quien llama a `arrancar()`, asi que lo que

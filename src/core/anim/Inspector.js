@@ -86,7 +86,24 @@ const STORE_KEY = 'sanpablera.anim.overrides';
  * @returns {{pose, state, move, lectura}}
  */
 export function pose(model, view) {
-    const rig = model.rig;
+    const rig = model && model.rig;
+    view = view || {};
+    // El modelo puede no existir: si el .glb falla, Engine deja `model` a null
+    // y el inspector se abre igual. Sin esta guarda, `model.rig` lanzaba
+    // dentro del runRenderLoop y congelaba la pantalla en cuanto se pulsaba F2.
+    // La respuesta es TOTAL y honesta: no hay pose, no hay lectura y el panel
+    // lo dice, en vez de enseñar numeros inventados de un cuerpo que no hay.
+    if (!rig) {
+        const vacio = { p: {} };
+        return {
+            pose: null,
+            state: vacio,
+            move: null,
+            lectura: lectura(vacio, view),
+            alcance: null,
+            sinModelo: true
+        };
+    }
     const t = Math.max(0, Math.min(1, view.t || 0));
 
     let res, move = null, attackKey = null;
@@ -511,8 +528,16 @@ export class AnimInspector {
     /** Resuelve la pose de la vista actual y la escribe en el modelo. */
     apply() {
         const res = pose(this.model, this.view);
-        if (this.model.applyPose) this.model.applyPose(res.pose, res.state);
+        if (this.model && this.model.applyPose && res.pose) {
+            this.model.applyPose(res.pose, res.state);
+        }
         this._renderLectura(res.lectura);
+        if (res.sinModelo) {
+            const cont = this.$('spf-read');
+            if (cont) {
+                cont.innerHTML = '<div class="spf-vacio">sin modelo cargado: no hay pose que inspeccionar</div>';
+            }
+        }
         this._renderAlcance(res.alcance);
         if (this.onApply) this.onApply(res);
         return res;

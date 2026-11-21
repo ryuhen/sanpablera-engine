@@ -226,6 +226,58 @@ export {
 } from '../../ui/ControlsSettings.js';
 
 // ---------------------------------------------------------------------------
+// MODOS DE JUEGO Y ECONOMIA (Biblia Apex Primal, secciones 6 y 7)
+//
+// Son datos y reglas puras. No se reimplementa nada: estan en core/ y aqui
+// solo se exponen bajo un nombre que el motor y los tests pueden encontrar.
+// ---------------------------------------------------------------------------
+export {
+    CURRENCY, ACTIVITY, createWallet, credit, debit, settleFees, touch,
+    advanceActivity, restore, serialize as serializeWallet,
+    deserialize as deserializeWallet, createVault, linkAccount
+} from '../../core/economy/economy.js';
+export {
+    MAX_PLAYERS, RELAY_WINDOW_MS, WEAPONS, PROTECTION, PROTECTION_SLOTS,
+    VEHICLES, FOOD, PHASE as ROYALE_PHASE, createRoyale, currentMatch,
+    start as startRoyale, tick as tickRoyale, relay, resolveMatch,
+    collect, openCrate, eat, protectionOf, damage as damageRoyale,
+    serialize as serializeRoyale
+} from '../../core/modes/battleRoyale.js';
+
+// ---------------------------------------------------------------------------
+// DIORAMA Y CEL-SHADING (Biblia Apex Primal, seccion 2)
+//
+// La geografia de Margarita se convierte en descriptores planos en core/ y el
+// render/ los dibuja. El motor aplica el zoom que devuelve `zoomPara`.
+// ---------------------------------------------------------------------------
+export {
+    ESCALA_POR_DEFECTO, RADIO_HITO, buildDioramaData, hitoEn, hitosAbiertos,
+    siguienteHito, zoomPara, aPaleta
+} from '../../core/geo/diorama.js';
+export {
+    SHADER_NAME, registrarShaders, createToonMaterial, applyCelShading, isToon
+} from '../../render/ToonMaterial.js';
+
+// ---------------------------------------------------------------------------
+// NARRATIVA Y SESION (Biblia Apex Primal, seccion 7)
+//
+// El Cuarteto del Caribe decide bandos y secretos; `session.js` es el pegamento
+// que convierte cada KO del motor en Cobre, avance de cuadro y ciclo.
+// ---------------------------------------------------------------------------
+export {
+    VERSION as VERSION_CUARTETO, FASE as FASE_CUARTETO, BANDO,
+    RECOMPENSA as RECOMPENSA_CUARTETO, RESULTADO, RIVALES, SECRETOS, SECRETO_IDS,
+    createCampaign, nextCycle, discoverSecret, startSidequest, resolveSidequest,
+    serialize as serializeCampana, deserialize as deserializeCampana,
+    resumen as resumenCampana, repartir, personajeValido, nombreDe
+} from '../../core/narrative/cuarteto.js';
+export {
+    MODO, RECOMPENSA as RECOMPENSA_SESION, FASE_SESION, createSession, dueloActual,
+    tickSesion, relevo, registrarVictoria, registrarKO, lineaHUD, textoCampana,
+    serializeSession, deserializeSession
+} from '../../core/modes/session.js';
+
+// ---------------------------------------------------------------------------
 // EL ESTADO DEL MOTOR, en una foto
 // ---------------------------------------------------------------------------
 
@@ -245,7 +297,11 @@ export const SYSTEM_STATUS = Object.freeze({
     GROUND: { done: false, note: 'modelo posicional (13 posiciones), castigo por zonas, stance de 5 posturas con 10 acciones y cinematica de superposicion (10 guiones): TODO hecho y probado; falta un estado de la FSM por posicion y por accion' },
     AIR: { done: true, note: 'seis saltos, tres familias de ataque aereo y el antiaereo desde el suelo' },
     LOCOMOTION: { done: true, note: 'paso por toque frente a caminata, paso largo, dash y ataques corriendo' },
-    CLOTH: { done: true, note: 'tela por cadenas de verlet cosida a los hombros' }
+    CLOTH: { done: true, note: 'tela por cadenas de verlet cosida a los hombros' },
+    ROYALE: { done: false, note: 'cuadro de 4 jugadores, relevos, botin, campeon y recompensa encadenados; faltan cuatro mandos locales reales en la UI' },
+    ECONOMY: { done: false, note: 'Cobre/Diamante, rentas e inactividad con adapter inyectado: falta Supabase/Google reales (sin credenciales)' },
+    NARRATIVE: { done: true, note: 'Cuarteto del Caribe con bandos, secretos y sidequests encadenados a cada victoria por session.js' },
+    DIORAMA: { done: true, note: 'Mapa de Margarita en maqueta low-poly con zoom por hito y cel-shading aplicado a los peleadores' }
 });
 
 /** Los sistemas a medio hacer, por orden de lo que bloquea mas. */
@@ -254,7 +310,9 @@ export const PENDING = Object.freeze([
     'CANCEL: encadenar golpe dentro de la recuperacion de otro',
     'GUARD_IK: deflection (el brazo busca la extremidad del atacante)',
     'APPAREL: colgar la malla de las prendas de los huesos en runtime',
-    'GRAPPLE: variantes por disciplina (judo, sambo, sumo, greco)'
+    'GRAPPLE: variantes por disciplina (judo, sambo, sumo, greco)',
+    'ROYALE: cuatro mandos locales reales (InputRouter/UI son de un jugador)',
+    'ECONOMY: adapter real de Supabase y login de Google (requiere credenciales)'
 ]);
 
 export default { SYSTEM_STATUS, PENDING };

@@ -74,10 +74,17 @@ export class ControlsScreen {
         this._keyEl = null;
         this._padEl = null;
         this._msgEl = null;
-        this._keyHandler = null;
+        this.keyHandler = null;
         this._padHandler = null;
         this._padTimer = null;
-        this._onPadChange = null;
+        // El mando se lee por sondeo, asi que hace falta una foto anterior
+        // DESDE EL PRIMER FRAME: sin ella, `this._padPrev[i]` revienta en
+        // cuanto alguien pulsa un boton mientras escucha una asignacion.
+        this._padPrev = [];
+        // Se crea aqui y no en `open()` porque `build()` registra los
+        // listeners en este mismo constructor-abierto (ver `build()`).
+        this._onPadChange = () => this.updatePadLabel();
+        this._resolve = null;
     }
 
     /** Muestra la pantalla y resuelve cuando el usuario la cierra. */
@@ -86,7 +93,12 @@ export class ControlsScreen {
         this.build();
 
         return new Promise((resolve) => {
-            this._onPadChange = () => this.updatePadLabel();
+            // El boton GUARDAR Y VOLVER no recibe la funcion: la guarda aqui.
+            // Antes `this._resolve` no se asignaba nunca y la promesa quedaba
+            // colgada: `controlsOpen` se quedaba en true y F1 dejaba de abrir
+            // el menu para el resto de la partida.
+            this._resolve = resolve;
+            this._padPrev = [];
             this.router.setEnabled(false);
             this.router.releaseAll();
 
@@ -106,16 +118,18 @@ export class ControlsScreen {
     close(resolve) {
         clearInterval(this._padTimer);
         if (this.keyHandler) window.removeEventListener('keydown', this.keyHandler, true);
-        if (this._padEl) {
-            this._padEl.removeEventListener('gamepadconnected', this._onPadChange);
-            this._padEl.removeEventListener('gamepaddisconnected', this._onPadChange);
-        }
+        // `gamepadconnected` se dispara en window, no en el div del menu:
+        // registrar los listeners ahi los dejaba inertes para siempre.
+        window.removeEventListener('gamepadconnected', this._onPadChange);
+        window.removeEventListener('gamepaddisconnected', this._onPadChange);
         if (this.element && this.element.parentNode) {
             this.element.parentNode.removeChild(this.element);
         }
         this._bound = false;
         this.router.setEnabled(true);
-        if (typeof resolve === 'function') resolve();
+        const done = typeof resolve === 'function' ? resolve : this._resolve;
+        this._resolve = null;
+        if (typeof done === 'function') done();
     }
 
     // =======================================================================
@@ -165,8 +179,8 @@ export class ControlsScreen {
         this._padEl.className = 'spf-ctl-pad';
         this._padEl.textContent = 'Mando: buscando...';
         root.appendChild(this._padEl);
-        this._padEl.addEventListener('gamepadconnected', this._onPadChange);
-        this._padEl.addEventListener('gamepaddisconnected', this._onPadChange);
+        window.addEventListener('gamepadconnected', this._onPadChange);
+        window.addEventListener('gamepaddisconnected', this._onPadChange);
 
         // ---- aviso ----
         this._msgEl = document.createElement('div');
@@ -194,7 +208,7 @@ export class ControlsScreen {
         back.textContent = 'GUARDAR Y VOLVER';
         back.addEventListener('click', () => {
             saveBindings(this.map);
-            this.close(this._resolve);
+            this.close();
         });
         foot.appendChild(back);
 
@@ -304,14 +318,12 @@ export class ControlsScreen {
     }
 
     assignPad(action, index) {
-        if (index < 4 || (index >= 12 && index <= 15)) {
-            // Cruceta y cara: son direcciones, no acciones de combate.
-            const dirs = { 12: 'up', 13: 'down', 14: 'left', 15: 'right' };
-            if (action === 'up' || action === 'down' || action === 'left' || action === 'right') {
-                const code = dirs[index];
-                if (code) { this.assign(action, code); return; }
-            }
-        }
+        // Un boton del mando es siempre un INDICE de boton, tambien en la
+        // cruceta: `InputRouter` comprueba `pad.buttons[idx].pressed`.
+        // La rama anterior traducia 12..15 a las teclas 'up'/'down'/... y
+        // escribia en el mapa de TECLADO; con un boton de cara (0..3) el
+        // indice no estaba en la tabla y se guardaba `undefined`, que al
+        // serializar se convierte en [null] y se pierde al recargar.
         this.mapPad[action] = [index];
         this.router.setPadMap(this.mapPad);
         this.updatePadRow(action);

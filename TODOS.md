@@ -8,6 +8,10 @@ Regla de la casa: **nada se da por hecho hasta que hay un test que lo falla si
 se rompe.** Cuando algo no se puede testear en Node (DOM, Babylon), se anota
 como "mirar en el navegador" y no se cuenta como cerrado.
 
+Los números de comprobaciones NO se escriben aquí: cambian con cada test nuevo
+y convertir esta lista en un censo es la forma más rápida de que mienta. La
+fuente es `npm test`. Sí se nombra el archivo de test que fija cada bloque.
+
 ---
 
 ## Bloque 1 · El muro de grafiti `[x] PARCIAL`
@@ -19,7 +23,9 @@ Lo que ya está:
       BO, DO, GT, HN, PA, NI, UY, PY).
 - [x] `ui/graffiti/writers.js` — 6 grafiteros con paleta, rollo, jerga y brocha.
       El del día se elige por fecha.
-- [x] `tests/ui.smoke.mjs` — 134 comprobaciones.
+- [x] `tests/ui.smoke.mjs` fija los datos (jerga, paletas, brochas, grafitero
+      del día). **No comprueba que se pinten**: `LoadingScreen.js` importa solo
+      `Postcard.js`, no estos dos módulos (verificado).
 
 Lo que falta:
 
@@ -46,15 +52,16 @@ Lo que ya está:
 - [x] `ui/selectState.js` — la lógica entera, sin DOM: cruceta, los 4 botones,
       los 2 lados, cuándo se puede pelear.
 - [x] `ui/selectAnims.js` — 21 animaciones, repertorio DISTINTO por peleador.
-- [x] `tests/select.smoke.mjs` — 123 comprobaciones.
+- [x] `tests/select.smoke.mjs` fija la lógica pura. **No comprueba la pantalla**:
+      `SelectScreen.js` importa `roster.js` y `CustomFighter.js`, mantiene su
+      propia lógica (`this.pick1`, `this.pick2`, `this.turn`) y nunca usa
+      `selectState.js` (verificado).
 - [x] `ui/wardrobe.js` — 8 atuendos con `soltable`/`arma` para el desarme futuro.
 
 Lo que falta:
 
-- [ ] **Reescribir `SelectScreen.js` para usar `selectState.js`.** Ahora la
-      pantalla tiene su propia lógica (`this.pick1`, `this.pick2`, `this.turn`)
-      y la de `selectState.js` no la usa nadie. Hay que elegir una sola fuente
-      de verdad: la de `selectState`, que sí está testeada.
+- [ ] **Reescribir `SelectScreen.js` para usar `selectState.js`.** Hay que elegir
+      una sola fuente de verdad: la de `selectState`, que sí está testeada.
 - [ ] **El panal unido por lados.** Hoy son 8 celdas sueltas en un `grid`. Lo
       pedido es que cada hexágono se una a los demás por varios lados.
 - [ ] **La vista previa 3D** del peleador enfocado (solo uno, no nueve).
@@ -101,23 +108,138 @@ como arte del juego.
 
 ---
 
-## Bloque 5 · Vestuario con malla (a futuro)
+## Bloque 5 · Vestuario con malla `[x] PARCIAL`
 
-- [ ] Cuando haya ropa de verdad, cada atuendo traerá un `model`. La
-      estructura ya está preparada (`piezas` son huesos del contrato).
+Lo que ya está:
+
+- [x] `render/PartMannequin.js` — maniquí modular de cápsulas, cajas y esferas
+      colgado de los huesos del contrato; se puede teñir por peleador.
+      `CharacterModel.js` lo usa con `?piezas=1`.
+- [x] `tests/render.smoke.mjs` y `tests/anim.smoke.mjs` cubren la construcción de
+      las piezas con un stub de Babylon.
+- [x] `ui/wardrobe.js` — catálogo de 8 atuendos con `soltable`/`arma`.
+
+Lo que falta:
+
+- [ ] **Colgar la MALLA de las prendas en runtime** (`SYSTEM_STATUS.APPAREL
+      .done:false`): hoy el maniquí son primitives, no la malla del atuendo.
 - [ ] **Las piezas que se rompen.** El campo `soltable`/`arma` ya existe en los
       datos; falta la mecánica en el combate (desarme de la fase 4, ver
       `core/phases.js`).
+- [ ] **Ver en el navegador** el maniquí y el tinte por peleador.
 
 ---
 
-## Bloque 6 · Animaciones por peleador (a futuro)
+## Bloque 6 · Animaciones por peleador `[x] PARCIAL`
 
-- [ ] **La biblioteca de clips** (`ClipLibrary`): hoy el motor genera poses
-      procedurales, no reproduce clips grabados.
+Lo que ya está:
+
+- [x] `core/anim/ClipLibrary.js` — biblioteca de clips con fases, duración en
+      frames y pose; `render/ClipGrabber.js` la registra en el arranque.
+- [x] `tests/clips.smoke.mjs` y `tests/clipassets.smoke.mjs` fijan la biblioteca.
+- [x] `ui/selectAnims.js` — 21 animaciones con repertorio distinto por peleador.
+
+Lo que falta:
+
+- [ ] **Clips grabados de verdad.** Hoy son poses procedurales con nombre de
+      clip: no hay captura de movimiento ni archivos de animación.
 - [ ] **Cada `clip` de `selectAnims.js` pasa a existir de verdad.** Los nombres
       ya están puestos (`IDLE`, `KICK_HIGH`, `SUBMISSION`...); cuando haya
       clips, esta tabla no cambia, solo se le añaden entradas.
+- [ ] **Los clips de §4 que faltan** (sentadilla+upkick, apoyo mixto, blitz en
+      punta de pies, avance agachado con mano apoyada, pasos fantasma): ver
+      bloque 8.
+
+---
+
+## Bloque 7 · Biblia Apex Primal §2, §6 y §7 `[x] PARCIAL`
+
+Lo que ya está:
+
+- [x] `core/geo/diorama.js` + `render/Diorama.js` — Margarita en miniatura:
+      contorno, zonas, hitos, selección por marcador y zoom por hito.
+- [x] `render/ToonMaterial.js` — cel-shading a tres tonos con borde entintado;
+      cae a `StandardMaterial` si Babylon no trae `ShaderMaterial`.
+- [x] `ui/ModeSelect.js` — cuatro modos: CLASICO, DIORAMA, ROYALE, CAMPAÑA.
+- [x] `core/economy/economy.js` — Cobre/Diamante, rentas, inactividad y
+      monedero con adapter inyectado. El motor solo gasta Cobre.
+- [x] `core/modes/battleRoyale.js` + `core/modes/session.js` — cuadro de hasta
+      cuatro, relevos, botín, campeón; y el pegamento que convierte cada KO en
+      Cobre, avance de duelo y ciclo, con guardado local.
+- [x] `core/narrative/cuarteto.js` — bandos tatami/afueras, secretos y
+      misiones secundarias del Cuarteto del Caribe.
+- [x] `core/Engine.js` — menú de modo en el arranque, maqueta en lugar del
+      libro de origami en DIORAMA, cel-shading en los GLB, KO → sesión y panel
+      con el estado de la partida.
+- [x] `ui/SessionPanel.js` — la vista del panel, sacada de `Engine.js` para
+      poder probarla con DOM falso.
+- [x] Tests nuevos: `controls` (ModeSelect), `economy`, `royale`, `diorama`,
+      `toon`, `narrative`, `session`, `sessionpanel.dom` y `wiring.smoke`.
+
+Lo que falta:
+
+- [ ] **Cuatro mandos locales reales para el Royale.** `InputRouter` detecta un
+      solo mando y la UI es de un jugador; el cuadro de cuatro es solo datos.
+- [ ] **Botín, protección segmentada, vehículos, comida y relevos EN PARTIDA.**
+      `battleRoyale.js` lo decide en Node, pero `Engine` no importa `collect`,
+      `openCrate`, `eat`, `protectionOf` ni `damageRoyale`.
+- [ ] **Sidequests, secretos y emparejamientos dinámicos del Cuarteto.**
+      `cuarteto.js` los tiene; `Engine` solo llama a `nextCycle()`.
+- [ ] **Rentas, inactividad y avisos por correo en el bucle.** `economy.js` los
+      calcula; `settleFees`, `advanceActivity` y `deserializeSession` nunca se
+      ejecutan. La persistencia es `localStorage`, no Supabase.
+- [ ] **La maqueta cobra vida (§2 híbrido).** Falta la transición a escena
+      detallada con sprites 2D, polvo y objetos rompibles: hoy solo hay zoom.
+- [ ] **Supabase/Google reales.** Sin credenciales, queda la capa con adapter
+      inyectado.
+- [ ] **Ver en el navegador.** Zoom de la maqueta, shader en el GLB y panel de
+      sesión no se pueden comprobar en Node: `wiring.smoke` comprueba que el
+      cableado existe, no que se vea.
+
+---
+
+## Bloque 8 · Biblia Apex Primal §3-§5 · núcleo biomecánico `[ ]`
+
+Auditoría del PDF contra el código (§1-§7; **no hay §8 ni §9**). Es lo que de
+verdad separa el motor actual del juego descrito en la Biblia. Nada de esto
+tiene test todavía: al implementarlo se añade aquí la suite que lo fija.
+
+### Prioridad 0 · lo que define el combate
+
+- [ ] **IK a dos esqueletos (§3).** `Rig.js` resuelve un solo rig contra un
+      *target*; `GrappleSession.js` arbitra frames pero no deforma esqueletos.
+      Falta ajustar a la vez manos y brazos de TORI y UKE en agarres,
+      proyecciones, clinches y *clashes*. Tampoco hay deflexión con IK
+      (`GUARD_IK`).
+- [ ] **Fatiga de guardia, fracturas por inercia y TKO anatómico (§5).**
+      `defend()` es un check binario de altura: bloquear 1 o 20 golpes cuesta
+      igual. `takeHit()` resta `move.damage` plano y `_contactoDe()` usa una
+      banda declarada, no el punto real de contacto. `HitReactions` y `ZONES`
+      son datos sin cablear.
+- [ ] **Tai Sabaki (§3).** Hay un clip `side_step` y una ventana de evasión,
+      pero nadie reposiciona el centro de gravedad ni encadena contraataque
+      desde esa posición.
+- [ ] **Encadenado real de golpes (§4 / `CANCEL`).** Están `cancelTier`,
+      `Transitions`, `PoseBlender` y los clips; falta poder cancelar un golpe
+      DENTRO de la recovery de otro.
+
+### Prioridad 1 · dinámicas de §4 que no existen
+
+- [ ] **Sentadilla profunda + upkicks.** Hay clips `sitting_*` como assets, pero
+      no hay estado `SENTADO` ni move `upkick`.
+- [ ] **Apoyo mixto (una rodilla en tierra).** `DE_RODILLAS` es recuperación de
+      knockdown, no postura con pie opuesto soportando y ganchos de ángulo bajo.
+- [ ] **Inversión de guardia en el paso sostenido.** `LOCO` distingue toque de
+      mantenimiento como datos; `FighterEntity` nunca cambia `stance`. Además
+      `readLoco()` escribe `tapKind`/`tapDirX` que nadie lee.
+- [ ] **Blitz en punta de pies**, **avance agachado con mano apoyada** y
+      **pasos fantasma**: no hay estado, clip ni función para ninguno.
+
+### Otros sistemas abiertos (del propio `SYSTEM_STATUS`)
+
+- [ ] `APPAREL`, `GUARD_IK`, `GROUND` (modelo posicional sin estado FSM ni
+      botones), `CANCEL` y las variantes por disciplina de `GRAPPLE`
+      (judo, sambo, sumo, greco) siguen con `done:false`.
 
 ---
 
@@ -127,8 +249,16 @@ como arte del juego.
 |---|---|
 | 1 (datos del muro) | `node tests/ui.smoke.mjs` |
 | 2 (lógica de selección) | `node tests/select.smoke.mjs` |
+| 5 (maniquí de piezas) | `node tests/render.smoke.mjs`, `tests/anim.smoke.mjs` |
+| 6 (biblioteca de clips) | `node tests/clips.smoke.mjs`, `tests/clipassets.smoke.mjs` |
 | 2 y 1 (lo pintado) | navegador: `npm start` |
 | 3, 4 | navegador (no hay forma de testear un SVG en Node) |
+| 7 (modos y maqueta) | `node tests/{controls,economy,royale,diorama,toon,narrative,session}.smoke.mjs` |
+| 7 (panel de sesión) | `node tests/sessionpanel.dom.mjs` |
+| 7 (cableado en `Engine`) | `node tests/wiring.smoke.mjs` |
+| 7 (lo pintado) | navegador: `npm start` |
+| 8 (núcleo biomecánico) | sin test: está abierto, se añadirá al implementarlo |
 
-`npm test` corre las 10 suites. Un bloque no está cerrado hasta que su test
-pasa.
+`npm test` corre todas las suites registradas en `package.json`. Un bloque no
+está cerrado hasta que su test pasa. `tests/wiring.smoke.mjs` falla si aparece
+una suite nueva que no esté registrada ahí.

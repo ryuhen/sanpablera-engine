@@ -889,6 +889,32 @@ run('onZoom se llama con la delta de la rueda sobre la escena', () => {
     insp.close();
 });
 
+run('sin modelo el inspector no revienta y lo dice', () => {
+    // Engine pasa `model: null` cuando el .glb falla. Antes `pose()` hacia
+    // `model.rig` sin guardia y la excepcion caia DENTRO del render loop:
+    // pantalla congelada en cuanto se pulsaba F2.
+    const res = I.pose(null, {
+        kind: 'ATTACK', moveKey: 'ATAQUE_LIGERO', context: 'STAND',
+        phase: 'ACTIVE', t: 1, height: 'ALTO', power: 'MEDIO', groundKind: 'PIE'
+    });
+    ok(res.sinModelo === true, 'la respuesta se declara sin modelo');
+    ok(res.pose === null, 'y no inventa una pose', res.pose);
+    ok(!!res.lectura && res.lectura.hipY === null, 'la lectura es total y esta vacia', res.lectura);
+    ok(res.alcance === null, 'sin brazos no hay alcance', res.alcance);
+
+    let avisos = 0;
+    const insp = new I.AnimInspector({ model: null, onApply: () => { avisos++; } });
+    O.clearAll();
+    insp.open();
+    ok(insp.isOpen() === true, 'el panel se abre igual');
+    ok(avisos > 0, 'y el engine sigue recibiendo la respuesta', avisos);
+    const texto = insp.$('spf-read').innerHTML;
+    ok(texto.includes('sin modelo'), 'el panel dice por que no hay pose', texto);
+    insp.tick(1 / 60);
+    ok(true, 'un frame del bucle no lanza');
+    insp.close();
+});
+
 // ===========================================================================
 console.log('\n' + '='.repeat(64));
 if (fails.length) {
