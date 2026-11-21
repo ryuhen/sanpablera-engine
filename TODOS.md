@@ -51,7 +51,7 @@ Lo que ya está:
 
 - [x] `ui/selectState.js` — la lógica entera, sin DOM: cruceta, los 4 botones,
       los 2 lados, cuándo se puede pelear.
-- [x] `ui/selectAnims.js` — 21 animaciones, repertorio DISTINTO por peleador.
+- [x] `ui/selectAnims.js` — 18 animaciones, repertorio DISTINTO por peleador.
 - [x] `tests/select.smoke.mjs` fija la lógica pura. **No comprueba la pantalla**:
       `SelectScreen.js` importa `roster.js` y `CustomFighter.js`, mantiene su
       propia lógica (`this.pick1`, `this.pick2`, `this.turn`) y nunca usa
@@ -134,10 +134,17 @@ Lo que falta:
 
 Lo que ya está:
 
-- [x] `core/anim/ClipLibrary.js` — biblioteca de clips con fases, duración en
-      frames y pose; `render/ClipGrabber.js` la registra en el arranque.
+- [x] `core/anim/ClipLibrary.js` — 83 clips procedurales con ficha (duración en
+      segundos, bucle, compromiso, capa); las fases viven dentro de cada
+      generador, no como campo de la ficha. `render/ClipGrabber.js` trae además
+      los clips grabados en GLB.
 - [x] `tests/clips.smoke.mjs` y `tests/clipassets.smoke.mjs` fijan la biblioteca.
-- [x] `ui/selectAnims.js` — 21 animaciones con repertorio distinto por peleador.
+- [x] `ui/selectAnims.js` — 18 animaciones con repertorio distinto por peleador
+      (21 es el número de huesos del contrato, no de animaciones).
+- [x] Editor del mapa (F3): `core/anim/ClipMap.js` junta `selectAnims`, la
+      biblioteca y los clips grabados; `core/anim/ClipEditor.js` mantiene una
+      copia editable y exporta un parche; `ui/AnimEditor.js` es la ventana con
+      ratón y teclado. F2 sigue siendo el inspector de poses/tablas IK.
 
 Lo que falta:
 
@@ -251,12 +258,13 @@ tiene test todavía: al implementarlo se añade aquí la suite que lo fija.
 | 2 (lógica de selección) | `node tests/select.smoke.mjs` |
 | 5 (maniquí de piezas) | `node tests/render.smoke.mjs`, `tests/anim.smoke.mjs` |
 | 6 (biblioteca de clips) | `node tests/clips.smoke.mjs`, `tests/clipassets.smoke.mjs` |
+| 6 (mapa y editor) | `node tests/clipmap.smoke.mjs`, `tests/clipeditor.smoke.mjs`, `tests/animateditor.dom.mjs` |
 | 2 y 1 (lo pintado) | navegador: `npm start` |
 | 3, 4 | navegador (no hay forma de testear un SVG en Node) |
 | 7 (modos y maqueta) | `node tests/{controls,economy,royale,diorama,toon,narrative,session}.smoke.mjs` |
 | 7 (panel de sesión) | `node tests/sessionpanel.dom.mjs` |
-| 7 (cableado en `Engine`) | `node tests/wiring.smoke.mjs` |
-| 7 (lo pintado) | navegador: `npm start` |
+| 6 y 7 (cableado en `Engine`, F1/F2/F3) | `node tests/wiring.smoke.mjs` |
+| 7 (lo pintado: shader, maqueta, panel y ventana F3) | navegador: `npm start` |
 | 8 (núcleo biomecánico) | sin test: está abierto, se añadirá al implementarlo |
 
 `npm test` corre todas las suites registradas en `package.json`. Un bloque no

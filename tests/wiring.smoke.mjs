@@ -131,6 +131,60 @@ section('5 · Ninguna suite se queda fuera de npm test');
     })(), script.match(/tests\/[^\s&&]+\.mjs/g));
 }
 
+section('6 · El editor de animaciones (F3) tambien esta cableado');
+for (const [nombre, ruta] of [
+    ['AnimEditor', "../ui/AnimEditor.js"],
+    ['ClipEditor', "./anim/ClipEditor.js"],
+    ['ClipMap', "./anim/ClipMap.js"],
+    ['ClipLibrary', "./anim/ClipLibrary.js"],
+    ['FighterRig', "./entities/FighterRig.js"]
+]) {
+    check('importa ' + nombre, tiene("from '" + ruta + "'"));
+}
+for (const [nombre, texto] of [
+    ['el estado del editor existe', 'let editorAnimaciones = null;'],
+    ['se construye el mapa', 'buildClipMap({'],
+    ['se construye el estado editable', 'createClipEditor({ mapa: mapaEditor })'],
+    ['se construye la ventana', 'new AnimEditor({'],
+    ['la biblioteca usa los generadores del rig', 'stancePoseFn: FighterRig.posturePose'],
+    ['la vista previa usa clips grabados', 'runner.pose(clip, lect.segundos)'],
+    ['y cae a la biblioteca procedural', 'poseDe(bibEditor, clip, modelo.rig'],
+    ['desempaqueta la Pose que envuelve ClipLibrary', 'if (pose && pose.pose) pose = pose.pose;'],
+    ['la apertura tiene nombre', 'const abrirEditorAnimaciones = () =>'],
+    ['se publica para el menu de desarrollo', 'window.SANPABLERA.abrirEditorAnimaciones'],
+    ['F3 abre el editor', "e.code === 'F3'"],
+    ['el bucle le da el frame', 'editorAnimaciones.tick(dt)'],
+    ['se puede coger desde la consola', 'getEditorAnimaciones']
+]) {
+    check(nombre, tiene(texto), texto);
+}
+{
+    const inicio = engine.indexOf('function render()');
+    const render = engine.slice(inicio);
+    const iEditor = render.indexOf('editorAnimaciones.isOpen()');
+    const iSinCombate = render.indexOf('if (!ui || !entities.length)');
+    check('el editor se abre incluso sin combate', iEditor > 0 && iEditor < iSinCombate,
+        { iEditor, iSinCombate });
+    const iInspector = render.indexOf('inspector.isOpen()');
+    check('el editor manda antes que el inspector (F2)', iEditor > 0 && iEditor < iInspector,
+        { iEditor, iInspector });
+}
+{
+    const E = await load('src/ui/AnimEditor.js');
+    check('AnimEditor exporta la clase', typeof E.AnimEditor === 'function');
+    check('AnimEditor exporta panelMarkup', typeof E.panelMarkup === 'function');
+    const C = await load('src/core/anim/ClipEditor.js');
+    check('ClipEditor exporta createClipEditor', typeof C.createClipEditor === 'function');
+    const L = await load('src/core/anim/ClipLibrary.js');
+    check('ClipLibrary exporta crearBiblioteca', typeof L.crearBiblioteca === 'function');
+    check('ClipLibrary exporta poseDe', typeof L.poseDe === 'function');
+    check('ClipLibrary exporta nombres', typeof L.nombres === 'function');
+    const R = await load('src/core/entities/FighterRig.js');
+    for (const k of ['locoPose', 'attackPose', 'posturePose']) {
+        check('FighterRig.default exporta ' + k, typeof R.default[k] === 'function');
+    }
+}
+
 console.log('\n' + '='.repeat(64));
 if (failed.length) {
     console.log('FALLOS (' + failed.length + '):');

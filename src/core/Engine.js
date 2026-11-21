@@ -50,6 +50,11 @@ import { ClipGrabber, ClipRunner } from '../render/ClipGrabber.js';
 import { createPose } from './cine/Pose.js';
 import { Cape } from '../render/ClothMesh.js';
 import { AnimInspector } from './anim/Inspector.js';
+import { AnimEditor } from '../ui/AnimEditor.js';
+import { createClipEditor } from './anim/ClipEditor.js';
+import { buildClipMap } from './anim/ClipMap.js';
+import { crearBiblioteca, poseDe, nombres as nombresClip } from './anim/ClipLibrary.js';
+import FighterRig from './entities/FighterRig.js';
 import { InputMapper } from './entities/InputMapper.js';
 import FighterEntity, { nextStance } from './entities/FighterEntity.js';
 import { StaminaGauge } from './combat/Stamina.js';
@@ -795,6 +800,9 @@ let hud = null;
 /** El inspector de animaciones (F2). Vive fuera del combat loop: cuando esta
  *  abierto, el bucle le cede el control de la pose. */
 let inspector = null;
+/** El editor del mapa de animaciones (F3). Es distinto del inspector: aqui se
+ *  recorren las 18 animaciones y se ajusta cada una, no se miran poses IK. */
+let editorAnimaciones = null;
 
 /**
  * Basis de la camara en el suelo: "adelante" es la proyeccion del
@@ -1090,6 +1098,67 @@ async function boot() {
     });
     if (fighters[0] && entities[0]) inspector.capeRef = entities[0].cape || null;
 
+    // --- EDITOR DEL MAPA DE ANIMACIONES (F3) -------------------------------
+    //
+    // El inspector (F2) responde a "¿como se ve ESTA pose?". El editor responde
+    // a "¿que animacion tengo, a que clip apunta y como la ajusto?". Por eso es
+    // un modulo aparte y no una pestaña mas del inspector: el inspector no sabe
+    // nada de selectAnims ni de la biblioteca de clips.
+    //
+    // La biblioteca se monta con los generadores del rig de verdad. No es la que
+    // usa el combate (ese llama a FighterRig directamente), pero es LA MISMA
+    // informacion: si un nombre de clip desaparece, el mapa lo marca aqui y no
+    // hace falta abrir la ventana para descubrirlo.
+    const bibEditor = crearBiblioteca({
+        locoPose: FighterRig.locoPose,
+        attackPose: FighterRig.attackPose,
+        stancePoseFn: FighterRig.posturePose
+    });
+    const mapaEditor = buildClipMap({
+        biblioteca: bibEditor,
+        nombresClip: nombresClip(bibEditor)
+    });
+    editorAnimaciones = new AnimEditor({
+        editor: createClipEditor({ mapa: mapaEditor }),
+        onPreview: (lect) => {
+            const modelo = fighters[0] && fighters[0].model;
+            if (!modelo || !lect) return;
+            const clip = lect.clipReal || lect.clip;
+            let pose = null;
+
+            // Primero lo grabado: es lo que se ve en partida. `ClipRunner` ya
+            // respeta el bucle y el final del clip, asi que no hay que recalcular
+            // nada aqui. Si el GLB no se pudo traer, se cae a la pose procedural.
+            const runner = entities[0] && entities[0].clipsGrabados;
+            if (runner) {
+                try { pose = runner.pose(clip, lect.segundos); } catch (_) { pose = null; }
+            }
+            if (!pose) {
+                try {
+                    pose = poseDe(bibEditor, clip, modelo.rig, lect.segundos, {
+                        phase: lect.fase
+                    });
+                } catch (_) { pose = null; }
+            }
+            // Los generadores de ClipLibrary devuelven `{ pose, state, spec... }`
+            // (porque el motor necesita el FK), NO una Pose. Los clips grabados
+            // si devuelven la Pose a secas. Sin desempaquetar, applyPose recibe
+            // un objeto sin `rot` y no mueve ningun hueso: falla en silencio.
+            if (pose && pose.pose) pose = pose.pose;
+            if (!pose || !pose.rot) return;
+
+            // Sin `opts.clip`: un instante elegido a mano no debe mezclarse con
+            // la pose anterior. La mezcla esta bien en un golpe, no en un
+            // scrubber donde quieres ver exactamente el frame que marca la barra.
+            modelo.applyPose(pose, null);
+        },
+        onExport: (json) => {
+            try { localStorage.setItem('spf.animEditor.patch', json); } catch (_) {}
+            console.log('Parche del editor de animaciones (tambien en localStorage):\n' + json);
+        },
+        onClose: () => { ui.router.releaseAll(); inputMapper.reset(); }
+    });
+
     // --- Atajo al menu de controles ---------------------------------------
     // F1 abre el configurador de teclado y mando. Mientras esta abierto el
     // juego queda congelado (el router desactiva el teclado), asi que no hace
@@ -1112,6 +1181,13 @@ async function boot() {
         inspector.toggle();
         if (!inspector.isOpen()) { ui.router.releaseTouch(); inputMapper.reset(); }
     };
+    const abrirEditorAnimaciones = () => {
+        if (!editorAnimaciones) return;
+        const abriendo = !editorAnimaciones.isOpen();
+        if (abriendo) { ui.router.releaseAll(); inputMapper.reset(); }
+        editorAnimaciones.toggle();
+        if (!editorAnimaciones.isOpen()) { ui.router.releaseTouch(); inputMapper.reset(); }
+    };
     const abrirControles = () => {
         if (controlsOpen) return;
         controlsOpen = true;
@@ -1129,12 +1205,18 @@ async function boot() {
     // hasta que el motor llega aqui.
     if (!window.SANPABLERA) window.SANPABLERA = {};
     window.SANPABLERA.abrirInspector = abrirInspector;
+    window.SANPABLERA.abrirEditorAnimaciones = abrirEditorAnimaciones;
     window.SANPABLERA.abrirControles = abrirControles;
 
     window.addEventListener('keydown', (e) => {
         if (e.code === 'F2') {
             e.preventDefault();
             abrirInspector();
+            return;
+        }
+        if (e.code === 'F3') {
+            e.preventDefault();
+            abrirEditorAnimaciones();
             return;
         }
         if (e.code !== 'F1' || controlsOpen) return;
@@ -1316,6 +1398,20 @@ function render() {
     // como segundos (el bug de siempre) hacia el juego ~16x mas rapido.
     const dt = Math.min(engine.getDeltaTime() / 1000, 0.1);
 
+    // --- EDITOR DEL MAPA DE ANIMACIONES (F3) -----------------------------
+    // Va ANTES del early return de "sin combate": el mapa se puede abrir en
+    // cualquier momento, no solo con dos peleadores en el ring. Sin modelo no
+    // hay vista previa 3D, pero el mapa y sus ajustes siguen funcionando.
+    // Tambien va antes del inspector (F2): si los dos estuvieran abiertos, el
+    // segundo que escribiera la pose ganaria, y no sabarias cual estas viendo.
+    if (editorAnimaciones && editorAnimaciones.isOpen()) {
+        fitCamera(dt);
+        editorAnimaciones.tick(dt);
+        if (hud) hud.tick(dt);
+        scene.render();
+        return;
+    }
+
     if (!ui || !entities.length) {
         // Todavia no hay combate: solo camara y dibujo.
         fitCamera(dt);
@@ -1459,6 +1555,7 @@ window.SANPABLERA = { engine, scene, camera, fighters, entities, world, inputMap
 // El inspector se expone por getter porque todavia es null aqui (se crea al
 // final de boot):
 window.SANPABLERA.getInspector = () => inspector;
+window.SANPABLERA.getEditorAnimaciones = () => editorAnimaciones;
 window.SANPABLERA.getRouter = () => (ui ? ui.router : null);
 
 // Modos de la Biblia: sesion, maqueta y diagnostico del cel-shading.
