@@ -223,8 +223,13 @@ class SelectScreen {
         const rename = fighter.custom
             ? ' · <u>[R] renombrar</u>'
             : '';
+        const gender = fighter.gender ? (fighter.gender === 'F' ? 'Femenino' : 'Masculino') : '';
+        const body = fighter.bodyType ? fighter.bodyType.charAt(0) + fighter.bodyType.slice(1).toLowerCase() : '';
+        const height = fighter.height ? ` · ${Number(fighter.height).toFixed(2)} m` : '';
+        const meta = (gender || body) ? `<u>${[gender, body].filter(Boolean).join(' · ')}${height}</u><br>` : '';
         this.info.innerHTML =
             `<b>${fighter.name}</b> — ${fighter.tag}${rename}<br>` +
+            meta +
             `<i>${fighter.style || ''}</i><br>` +
             `${fighter.story || ''}`;
     }

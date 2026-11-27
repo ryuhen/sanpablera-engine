@@ -55,7 +55,8 @@ import { buildRig, fk } from '../core/cine/Rig.js';
 import { createPose, rotOf, posOf } from '../core/cine/Pose.js';
 import { CFG } from '../core/cine/CineConstants.js';
 import { PoseBlender, BLEND } from '../core/anim/Blend.js';
-import { buildParts, tintParts } from './PartMannequin.js';
+import { buildParts, tintParts, PART_TABLE } from './PartMannequin.js';
+import { scalePartTable } from '../core/bodyTypes.js';
 
 /** Quita el sufijo del pivot de un nombre de glTF (`Bone.001` -> `Bone`). */
 function stripSuffix(name) {
@@ -387,9 +388,11 @@ export class CharacterModel {
         // funciona con cualquier modelo.
         this.parts = null;
         if (opts.parts) {
+            const baseParts = opts.parts === true ? PART_TABLE : opts.parts;
+            const scaledParts = opts.bodyType ? scalePartTable(baseParts, opts.bodyType) : baseParts;
             const built = buildParts(B, opts.scene, this.nodes, {
                 name: this.name,
-                parts: opts.parts === true ? undefined : opts.parts,
+                parts: scaledParts,
                 skin: opts.skin
             });
             this.parts = built.meshes.map((mesh, i) => ({

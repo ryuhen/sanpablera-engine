@@ -59,7 +59,7 @@ import { InputMapper } from './entities/InputMapper.js';
 import FighterEntity, { nextStance } from './entities/FighterEntity.js';
 import { StaminaGauge } from './combat/Stamina.js';
 import SPF from './fsm/Constants.js';
-import { fullRoster } from './roster.js';
+import { fullRoster, GENERATED_CHARACTERS } from './roster.js';
 import { STAGES } from './stages.js';
 import ModeSelect from '../ui/ModeSelect.js';
 import SessionPanel from '../ui/SessionPanel.js';
@@ -70,6 +70,15 @@ import {
 import { buildDioramaData, aPaleta } from './geo/diorama.js';
 import { createDiorama } from '../render/Diorama.js';
 import { applyCelShading } from '../render/ToonMaterial.js';
+import { FIGHTER_INTROS, introForFighter, validateIntros } from './cine/fighterIntros.js';
+import {
+    STAGE_PUZZLE, ACTION_TRIGGER, validatePuzzle, getNode as getPuzzleNode, createPuzzleState,
+    resolveTransition as resolveStageTransition,
+    applyTransition as applyStageTransition,
+    availableTransitions as availableStageTransitions
+} from './narrative/stagePuzzle.js';
+import { computeCombatCamera } from './scenario/cameraDirector.js';
+import { makeScenarioProp, propMarkerLabel, describePropCode, PROP_CATALOG } from './scenario/props.js';
 
 // Constants.js expone el namespace SPF como export por defecto (no hay
 // exports con nombre), asi que Intent se saca de ahi.
@@ -160,6 +169,10 @@ const INTERACT_RANGE = 1.25;
 const loading = new LoadingScreen({
     title: 'SANPABLERA',
     subtitle: 'MOTOR DE LUCHA',
+    // El gesto de arranque solo pide pantalla completa. La pantalla NO se va:
+    // se queda con el calentamiento mientras cargan los modelos y los clips,
+    // y el propio boot() la retira con dismiss() al terminar.
+    holdUntilDone: true,
     // El destino que se anuncia en la postal. Con el torneo sin empezar,
     // `siguiente({})` da el PRIMER lugar de la ruta (hoy El Morro): el sitio
     // por el que entra todo el mundo. No es un adorno ni un texto fijo: sale
@@ -227,6 +240,8 @@ const B = window.BABYLON;
 const canvas = document.getElementById('renderCanvas');
 const engine = new B.Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true });
 const scene = new B.Scene(engine);
+const occluderMeshes = [];
+const occludedNow = new Map(); // mesh -> originalVisibility
 scene.clearColor = new B.Color4(0.07, 0.08, 0.11, 1);
 loading.step('escena');
 
@@ -274,6 +289,12 @@ for (let i = 0; i < 8; i++) {
     const post = B.MeshBuilder.CreateCylinder('post' + i, { diameter: 0.07, height: 1.05 }, scene);
     post.position.set(Math.cos(a) * 3.1, 0.52, Math.sin(a) * 3.1);
     post.material = railMat;
+    registrarOccluder(post, {
+        id: 'POST_' + i, name: 'Poste',
+        shape: 'C', profile: '1', action: 'G', mobility: 'F', resistance: '4',
+        x: post.position.x, y: 0, z: post.position.z, w: 0.1, h: 1.05, d: 0.1,
+        tags: ['ring', 'post']
+    });
 }
 
 const hemi = new B.HemisphericLight('hemi', new B.Vector3(0, 1, 0), scene);
@@ -404,6 +425,11 @@ function makeFighter(slot, side) {
         displayName: slot.name,
         characterId: slot.characterId,
         color: slot.rgb,
+        gender: slot.gender || 'M',
+        bodyType: slot.bodyType || 'MESOMORFO',
+        height: slot.height || 1.8,
+        mass: slot.mass || 1.0,
+        reach: slot.reach || 1.0,
         x: corner.x,
         z: corner.z,
         // Mira al rival, no a un eje fijo: es lo unico que hace que los
@@ -427,6 +453,8 @@ const fighters = [];
 // decisiones (cuanto paga un KO, cuando avanza un ciclo) viven en core/modes,
 // que se testea en Node; aqui solo se conectan con el bucle y la camara.
 let sesion = null;
+/** Estado del rompecabezas narrativo: por donde viaja la pelea entre lugares. */
+let estadoPuzzle = null;
 let celShaderReal = false;
 let datosDiorama = null;
 let diorama = null;
@@ -457,15 +485,67 @@ function hexOf([r, g, b]) {
 }
 
 /**
- * Pinta el escenario con la paleta de la carta elegida (spec: el escenario
- * sale de la pantalla de seleccion estilo libro de origami).
+ * El rompecabezas de escenarios arranca donde empieza la pelea. Los lugares
+ * que no son nodo (el dojo, por ejemplo) dejan el estado apagado a proposito.
  */
-function applyStageTheme(stage) {
+function fijarNodoPuzzle(id) {
+    if (!getPuzzleNode(id)) { estadoPuzzle = null; return null; }
+    estadoPuzzle = createPuzzleState({
+        startNode: id,
+        flags: estadoPuzzle ? estadoPuzzle.flags : undefined
+    });
+    return estadoPuzzle;
+}
+
+/**
+ * Resuelve una accion del combate como transicion narrativa. Si la accion abre
+ * camino, mueve el estado del puzzle, pinta la paleta del destino y avisa a la
+ * sesion. La decision de si hay ruta la toma el modulo puro, no el motor.
+ */
+function viajarPorAccion(trigger, contexto = {}) {
+    const actual = estadoPuzzle || createPuzzleState({});
+    const ctx = { ...contexto, currentNode: actual.currentNode, flags: actual.flags };
+    const t = resolveStageTransition(actual.currentNode, trigger, ctx);
+    if (!t) return null;
+    estadoPuzzle = applyStageTransition(actual, t, { at: Date.now() });
+    const destino = STAGES.find((s) => s.id === t.to);
+    if (destino) applyStageTheme(destino, false);
+    if (sesion) sesion.lugar = t.to;
+    actualizarPanelModo();
+    return { estado: estadoPuzzle, transition: t };
+}
+
+/**
+ * Aplica consecuencias de combate de una transicion de puzzle.
+ * La ventaja "attacker" favorece al que provoco la accion; "defender" al otro.
+ */
+function aplicarConsecuenciaTransicion(transition, actor, rival) {
+    if (!transition || !transition.combat) return;
+    const c = transition.combat;
+    const dmg = Number(c.damage) || 0;
+    if (dmg <= 0) return;
+    let target = null;
+    if (c.advantage === 'attacker') target = rival;
+    else if (c.advantage === 'defender') target = actor;
+    else target = rival || actor; // neutro: penaliza al que recibe la accion
+    if (target && typeof target.health === 'number') {
+        target.health = Math.max(0, target.health - dmg);
+    }
+}
+
+/**
+ * Pinta el escenario con la paleta de la carta elegida (spec: el escenario
+ * sale de la pantalla de seleccion estilo libro de origami). El puzzle se fija
+ * aqui para que mapa, ring y narrativa arranquen en el mismo lugar; `false` se
+ * usa cuando el propio puzzle acaba de mover la pelea a otro nodo.
+ */
+function applyStageTheme(stage, fijarPuzzle = true) {
     if (!stage) return;
     ground.material.diffuseColor = B.Color3.FromHexString(stage.ground);
     mat.material.diffuseColor = B.Color3.FromHexString(stage.mat);
     railMat.diffuseColor = B.Color3.FromHexString(stage.rail);
     hemi.groundColor.copyFrom(B.Color3.FromHexString(stage.wall));
+    if (fijarPuzzle) fijarNodoPuzzle(stage.id);
 }
 
 /**
@@ -526,6 +606,7 @@ function elegirHito(id) {
     };
     applyDioramaPalette(aPaleta(hito));
     if (sesion) sesion.lugar = id;
+    fijarNodoPuzzle(id);
     actualizarPanelModo();
     return hito;
 }
@@ -550,6 +631,7 @@ function entrarAlRing() {
     camaraMaqueta = null;
     if (diorama && diorama.root && diorama.root.setEnabled) diorama.root.setEnabled(false);
     inputMapper.reset();
+    world.pendingPuzzleTransition = null;
     actualizarPanelModo();
 }
 
@@ -608,6 +690,9 @@ function sincronizarSesion() {
         const hito = id && datosDiorama
             ? datosDiorama.hitos.find(h => h.id === id) : null;
         if (hito) applyDioramaPalette(aPaleta(hito));
+        // Un cambio de campana tambien cambia de nodo del rompecabezas: si no,
+        // el mapa y la narrativa seguirian peleando en el lugar anterior.
+        if (id) fijarNodoPuzzle(id);
         reiniciarDuelo();
     }
     actualizarPanelModo();
@@ -616,6 +701,7 @@ function sincronizarSesion() {
 /** Vida, posicion e inercia al punto de partida para el siguiente duelo. */
 function reiniciarDuelo() {
     inputMapper.reset();
+    world.pendingPuzzleTransition = null;
     fighters.forEach((f, i) => {
         const esquina = FIGHTER_CORNERS[i] || FIGHTER_CORNERS[0];
         f.health = 100;
@@ -660,6 +746,8 @@ const world = {
     props: [],
     ringLimit: RING_LIMIT,
     minSpacing: MIN_SPACING,
+    /** Transicion de puzzle pendiente, disparada por un golpe/lanzamiento. */
+    pendingPuzzleTransition: null,
 
     opponentOf(entity) {
         if (entities.length < 2) return null;
@@ -755,6 +843,23 @@ const world = {
                     // Mi golpe conecto: la entidad lo apunta para la
                     // fijacion (TARGET ACTION: accion tras conectar).
                     attacker.onHitLanded(move, this);
+                    // Si el golpe fue fuerte cerca del borde, el puzzle puede mover
+                    // la pelea a otra locacion (lanzamiento / derribo fuerte).
+                    const edgeDist = this.ringLimit - Math.hypot(opp.fighter.x, opp.fighter.z);
+                    if (!this.pendingPuzzleTransition && edgeDist < 1.0) {
+                        const kd = move.knockdown && move.knockdown !== 'NONE';
+                        const launch = move.launch && ((move.launch.y || 0) > 1.5 || Math.abs(move.launch.x || 0) > 3);
+                        const grab = !!move.grab;
+                        const trigger = (grab || launch) ? ACTION_TRIGGER.LANZAMIENTO
+                            : (kd ? ACTION_TRIGGER.DERRIBO_FUERTE : null);
+                        if (trigger) {
+                            this.pendingPuzzleTransition = {
+                                trigger,
+                                actor: attacker.fighter,
+                                rival: opp.fighter
+                            };
+                        }
+                    }
                     return 'hit';
                 }
                 return 'dodged';
@@ -941,10 +1046,16 @@ async function boot() {
     fighters.push(makeFighter(selection.p1, 0));
     fighters.push(makeFighter(selection.p2, 1));
 
-    for (const f of fighters) {
+    for (let i = 0; i < fighters.length; i++) {
+        const f = fighters[i];
+        // Progreso fino dentro de "luchadores": ahora la barra se mueve también
+        // mientras se leen los .glb, que es la fase que antes parecia colgada.
+        loading.setProgress(fighters.length ? (i + 0.5) / fighters.length : 1);
         try {
             f.model = await loadCharacterModel(scene, MODEL_URL, {
                 name: f.name,
+                height: f.height,
+                bodyType: f.bodyType,
                 // Las piezas se cuelgan de los huesos del contrato, asi que el
                 // .glb puede ser el que sea: la silueta siempre es la misma.
                 parts: USE_PARTS
@@ -964,6 +1075,7 @@ async function boot() {
         // Cada peleador en su esquina, mirando al centro.
         f.model.place(f.x, f.z, f.facing);
     }
+    loading.step('luchadores');
 
     // --- Cel-shading de novela grafica (Biblia §2) -------------------------
     // Va despues de teñir y antes del primer frame. Los materiales toon leen la
@@ -1055,6 +1167,7 @@ async function boot() {
 
     // Estado del modo (Cobre, ciclo, hitos de la maqueta) en pantalla.
     crearPanelModo();
+    loading.step('interfaz');
 
     // --- INSPECTOR DE ANIMACIONES (F2) ------------------------------------
     //
@@ -1159,6 +1272,18 @@ async function boot() {
         onClose: () => { ui.router.releaseAll(); inputMapper.reset(); }
     });
 
+    // Los guiones de entrada viven en un modulo propio. Se validan aqui, con
+    // los clips REALES de la biblioteca del editor, para que un nombre mal
+    // escrito no llegue silenciosamente al director de intros. El peleador del
+    // jugador usa la intro generica y no cuenta como authoring.
+    const avisosIntro = validateIntros(
+        fullRoster().filter((s) => !s.custom),
+        new Set(nombresClip(bibEditor))
+    );
+    if (avisosIntro.length) console.warn('Guiones de intro: ' + avisosIntro.join('; '));
+    const avisosPuzzle = validatePuzzle();
+    if (avisosPuzzle.length) console.warn('Rompecabezas de escenarios: ' + avisosPuzzle.join('; '));
+
     // --- Atajo al menu de controles ---------------------------------------
     // F1 abre el configurador de teclado y mando. Mientras esta abierto el
     // juego queda congelado (el router desactiva el teclado), asi que no hace
@@ -1227,6 +1352,13 @@ async function boot() {
     // --- Bucle ------------------------------------------------------------
     engine.runRenderLoop(render);
     window.addEventListener('resize', () => engine.resize());
+
+    // Todo lo pesado ya esta listo: aqui si se cierra la barra y se va la
+    // pantalla de carga. Hacerlo antes dejaba al jugador mirando un ring
+    // mientras los .glb seguían llegando; ahora el calentamiento tapa esa
+    // espera y `step('listo')` convierte por fin la antesala en 100% real.
+    loading.step('listo');
+    loading.dismiss();
 }
 
 // ===========================================================================
@@ -1239,9 +1371,98 @@ async function boot() {
  * sea cual sea la distancia entre ellos (incluso en medio de una huida).
  * En modo target el enfoque aprieta.
  */
+// --- Cámara de combate: encuadre, ángulo de acción y oclusión -------------
+function registrarOccluder(mesh, propSpec = {}) {
+    if (!mesh) return null;
+    const prop = makeScenarioProp(propSpec);
+    mesh.metadata = { ...(mesh.metadata || {}), spfOccluder: true, spfProp: prop };
+    mesh.isPickable = true;
+    occluderMeshes.push(mesh);
+    crearMarcadorSuelo(mesh, prop);
+    return prop;
+}
+
+function crearMarcadorSuelo(mesh, prop) {
+    try {
+        if (!prop || prop.shadowMarker === false) return;
+        const label = propMarkerLabel(prop);
+        // Sombra/indicador en suelo
+        const disc = B.MeshBuilder.CreateDisc('spf_marker_' + prop.id, { radius: Math.max(0.35, (prop.size?.w || 1) * 0.45), tessellation: 32 }, scene);
+        disc.rotation.x = Math.PI / 2;
+        disc.position.set(mesh.position.x, 0.02, mesh.position.z);
+        disc.isPickable = false;
+        const m = new B.StandardMaterial('spf_marker_mat_' + prop.id, scene);
+        m.diffuseColor = new B.Color3(0.08, 0.08, 0.1);
+        m.emissiveColor = new B.Color3(0.15, 0.15, 0.18);
+        m.alpha = 0.45;
+        m.specularColor = B.Color3.Black();
+        disc.material = m;
+
+        // Texto del marcador (si DynamicTexture está disponible)
+        if (typeof B.DynamicTexture === 'function') {
+            const plane = B.MeshBuilder.CreatePlane('spf_marker_txt_' + prop.id, { width: 1.6, height: 0.35 }, scene);
+            plane.position.set(mesh.position.x, 0.03, mesh.position.z);
+            plane.rotation.x = Math.PI / 2;
+            plane.isPickable = false;
+            const dtTex = new B.DynamicTexture('spf_marker_dt_' + prop.id, { width: 512, height: 128 }, scene, true);
+            dtTex.hasAlpha = true;
+            const ctx = dtTex.getContext();
+            ctx.clearRect(0, 0, 512, 128);
+            ctx.fillStyle = 'rgba(0,0,0,0.45)';
+            ctx.fillRect(0, 0, 512, 128);
+            ctx.font = 'bold 34px monospace';
+            ctx.fillStyle = '#f4e7c3';
+            ctx.fillText(label, 18, 56);
+            ctx.font = '20px monospace';
+            ctx.fillStyle = '#cfc09a';
+            ctx.fillText(describePropCode(prop.code).slice(0, 42), 18, 92);
+            dtTex.update();
+            const tm = new B.StandardMaterial('spf_marker_txtm_' + prop.id, scene);
+            tm.diffuseTexture = dtTex;
+            tm.emissiveTexture = dtTex;
+            tm.opacityTexture = dtTex;
+            tm.specularColor = B.Color3.Black();
+            tm.backFaceCulling = false;
+            plane.material = tm;
+            mesh.metadata.spfMarker = { disc, plane };
+        } else {
+            mesh.metadata.spfMarker = { disc, plane: null, label };
+        }
+    } catch (err) {
+        console.warn('[camara] marcador de suelo no creado:', err);
+    }
+}
+
+function actualizarOclusionCamara() {
+    if (!occluderMeshes.length) return;
+    const targets = entities.filter(e => e.model && e.fighter).map(e => new B.Vector3(e.fighter.x, 1.0, e.fighter.z));
+    if (targets.length < 2) return;
+    const camPos = camera.position;
+    const shouldHide = new Set();
+
+    for (const target of targets) {
+        const dir = target.subtract(camPos);
+        const dist = dir.length();
+        if (dist <= 0.001) continue;
+        const ray = new B.Ray(camPos, dir.scale(1 / dist), dist - 0.2);
+        const hit = scene.pickWithRay(ray, (m) => !!(m && m.metadata && m.metadata.spfOccluder));
+        if (hit && hit.hit && hit.pickedMesh) shouldHide.add(hit.pickedMesh);
+    }
+
+    for (const [mesh, original] of occludedNow.entries()) {
+        if (!shouldHide.has(mesh)) {
+            mesh.visibility = original;
+            occludedNow.delete(mesh);
+        }
+    }
+    for (const mesh of shouldHide) {
+        if (!occludedNow.has(mesh)) occludedNow.set(mesh, mesh.visibility ?? 1);
+        mesh.visibility = 0.18;
+    }
+}
+
 function fitCamera(dt) {
-    // En la maqueta manda el zoom del hito. Sin esto, el encuadre de combate
-    // reapuntaria a los peleadores cada frame y la isla desapareceria.
+    // En la maqueta manda el zoom del hito.
     if (camaraMaqueta) {
         camera.setTarget(camaraMaqueta.target);
         camera.radius += (camaraMaqueta.radius - camera.radius) * (1 - Math.exp(-dt * 3));
@@ -1252,22 +1473,32 @@ function fitCamera(dt) {
     if (alive.length < 2) return;
 
     const [a, b] = alive;
-    const mx = (a.fighter.x + b.fighter.x) / 2;
-    const mz = (a.fighter.z + b.fighter.z) / 2;
-    const span = Math.hypot(a.fighter.x - b.fighter.x, a.fighter.z - b.fighter.z);
-
-    camera.setTarget(new B.Vector3(mx, 1.0, mz));
     const locked = entities.some(e => e.targetLock);
-    const base = locked ? 3.0 : 4.2;
-    const target = Math.max(base, span * 0.9 + 3.0);
+    const occluders = occluderMeshes.map((m) => m.metadata && m.metadata.spfProp).filter(Boolean);
 
-    // Con el inspector abierto manda el zoom manual (ctrl+rueda). Sin esto,
-    // `fitCamera` devolveria el radio a su valor canonico en cada frame y el
-    // zoom se perderia al instante. Al cerrar el inspector, el ajuste automatico
-    // vuelve a mandar solo.
-    const destino = (inspector && inspector.isOpen() && inspector.camBias)
-        ? inspector.camBias : target;
-    camera.radius += (destino - camera.radius) * (1 - Math.exp(-dt * 3));
+    const cam = computeCombatCamera({
+        a: { x: a.fighter.x, z: a.fighter.z },
+        b: { x: b.fighter.x, z: b.fighter.z },
+        currentAlpha: camera.alpha,
+        currentBeta: camera.beta,
+        currentRadius: camera.radius,
+        occluders,
+        locked,
+        dt
+    });
+
+    camera.setTarget(new B.Vector3(cam.target.x, cam.target.y, cam.target.z));
+
+    // Inspector abierto: respeta zoom manual, pero mantiene encuadre/ángulo suavizado.
+    if (inspector && inspector.isOpen() && inspector.camBias) {
+        camera.radius += (inspector.camBias - camera.radius) * (1 - Math.exp(-dt * 3));
+    } else {
+        camera.radius = cam.radius;
+    }
+    camera.alpha = cam.alpha;
+    camera.beta = cam.beta;
+
+    actualizarOclusionCamara();
 }
 
 /**
@@ -1515,16 +1746,98 @@ function render() {
         // que manda a alguien al suelo puede ser lo que provoque que se salga.
         resolveBodyClash(dt, input);
 
-        // Quien se sale del ring paga 50 de vida y los dos vuelven al centro.
-        // Se comprueba DESPUES de mover a todos, no dentro de la entidad: si
-        // se hiciera ahi, el rival podria "arrastrar" al otro fuera el mismo
-        // frame en que se mueve, y la falta se adjudicaria a quien todavia no
-        // ha salido.
-        const fuera = world.ringOut();
-        if (fuera) {
-            inputMapper.reset();
-            console.log(fuera + ' se salio del ring: -' + RING_OUT_DAMAGE + ' de vida');
+        // Transiciones disparadas por golpes/lanzamientos cerca del borde.
+        if (world.pendingPuzzleTransition) {
+            const p = world.pendingPuzzleTransition;
+            world.pendingPuzzleTransition = null;
+            const ctx = {
+                flags: estadoPuzzle ? estadoPuzzle.flags : {},
+                stats: (p.actor && p.actor.stats) || {},
+                actor: p.actor ? p.actor.name : null,
+                rival: p.rival ? p.rival.name : null
+            };
+            const viaje = viajarPorAccion(p.trigger, ctx);
+            if (viaje && viaje.transition) {
+                aplicarConsecuenciaTransicion(viaje.transition, p.actor, p.rival);
+                for (const f of fighters) { f.x = 0; f.z = 0; }
+                if (p.actor && p.rival && fighters.length >= 2) {
+                    p.rival.x = -MIN_SPACING / 2;
+                    p.actor.x = MIN_SPACING / 2;
+                    p.rival.facing = facingToward(p.rival.x, p.rival.z, p.actor.x, p.actor.z);
+                    p.actor.facing = facingToward(p.actor.x, p.actor.z, p.rival.x, p.rival.z);
+                }
+                for (const ent of entities) {
+                    if (typeof ent.vx === 'number') ent.vx = 0;
+                    if (typeof ent.vz === 'number') ent.vz = 0;
+                    if (typeof ent.cutBlend === 'function') ent.cutBlend();
+                }
+                world.hitstop = Math.max(world.hitstop, 12);
+                inputMapper.reset();
+                console.log('[puzzle] ' + (p.actor ? p.actor.name : '?') + ' -> ' + viaje.transition.to + ' via ' + viaje.transition.trigger);
+            }
         }
+
+        // Quien se sale del ring: primero se intenta una transicion del puzzle
+        // de accion (CAIDA/SALTO). Si el escenario conecta, el combate viaja; si no,
+        // se aplica la falta clasica de ring out.
+        const fueraNombre = (() => {
+            let fueraF = null;
+            for (const f of fighters) {
+                if (Math.hypot(f.x, f.z) > world.ringLimit) { fueraF = f; break; }
+            }
+            if (!fueraF) return null;
+
+            const fueraEnt = entities.find((e) => e.fighter === fueraF) || null;
+            const rivalEnt = world.opponentByFighter(fueraF);
+            const rival = rivalEnt ? rivalEnt.fighter : null;
+            const ctx = {
+                flags: estadoPuzzle ? estadoPuzzle.flags : {},
+                stats: fueraF.stats || {},
+                actor: fueraF.name,
+                rival: rival ? rival.name : null
+            };
+
+            // SALTO si el actor venia en movimiento aereo/intencional, si no CAIDA.
+            const locoState = fueraEnt && fueraEnt.loco ? String(fueraEnt.loco.state || '') : '';
+            const pareceSalto = /JUMP|AIR|SALTO/i.test(locoState);
+            const triggers = pareceSalto
+                ? [ACTION_TRIGGER.SALTO, ACTION_TRIGGER.CAIDA]
+                : [ACTION_TRIGGER.CAIDA, ACTION_TRIGGER.SALTO];
+            let viaje = null;
+            for (const trig of triggers) {
+                viaje = viajarPorAccion(trig, ctx);
+                if (viaje) break;
+            }
+
+            if (viaje && viaje.transition) {
+                aplicarConsecuenciaTransicion(viaje.transition, fueraF, rival);
+                // Reposicionar al centro del nuevo escenario sin curar vida.
+                for (const f of fighters) { f.x = 0; f.z = 0; }
+                if (rival && fighters.length >= 2) {
+                    fueraF.x = -MIN_SPACING / 2;
+                    rival.x = MIN_SPACING / 2;
+                    fueraF.facing = facingToward(fueraF.x, fueraF.z, rival.x, rival.z);
+                    rival.facing = facingToward(rival.x, rival.z, fueraF.x, fueraF.z);
+                }
+                for (const ent of entities) {
+                    if (typeof ent.vx === 'number') ent.vx = 0;
+                    if (typeof ent.vz === 'number') ent.vz = 0;
+                    if (typeof ent.cutBlend === 'function') ent.cutBlend();
+                }
+                world.hitstop = Math.max(world.hitstop, 12);
+                inputMapper.reset();
+                console.log('[puzzle] ' + fueraF.name + ' -> ' + viaje.transition.to + ' via ' + viaje.transition.trigger);
+                return fueraF.name;
+            }
+
+            const fuera = world.ringOut();
+            if (fuera) {
+                inputMapper.reset();
+                console.log(fuera + ' se salio del ring: -' + RING_OUT_DAMAGE + ' de vida');
+            }
+            return fuera;
+        })();
+        if (fueraNombre) { /* ya gestionado */ }
     }
 
     // Un KO aqui se convierte en Cobre / avance de cuadro / ciclo de historia.
@@ -1542,11 +1855,19 @@ function render() {
 }
 
 // Arranca en cuanto el DOM esta listo (el script es un modulo, asi que ya lo
-// esta, pero por si se carga con defer o en el head).
+// esta, pero por si se carga con defer o en el head). Si algo falla, la pantalla
+// de carga NO se queda pegada: se retira y el error queda en consola.
+function iniciar() {
+    boot().catch((err) => {
+        console.error('No se pudo arrancar Sanpablera', err);
+        if (loading.started) loading.dismiss();
+        else loading.destroy();
+    });
+}
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
+    document.addEventListener('DOMContentLoaded', iniciar);
 } else {
-    boot();
+    iniciar();
 }
 
 // Para depurar desde la consola del navegador.
@@ -1561,6 +1882,31 @@ window.SANPABLERA.getRouter = () => (ui ? ui.router : null);
 // Modos de la Biblia: sesion, maqueta y diagnostico del cel-shading.
 window.SANPABLERA.getSesion = () => sesion;
 window.SANPABLERA.getDiorama = () => diorama;
+// Guiones de entrada y tipologías: antes vivian en modulos que nadie llamaba.
+window.SANPABLERA.getFighterIntros = () => FIGHTER_INTROS;
+window.SANPABLERA.getIntro = (id) => introForFighter(id);
+window.SANPABLERA.validarIntros = () => validateIntros(fullRoster().filter((s) => !s.custom));
+window.SANPABLERA.generatedRoster = () => GENERATED_CHARACTERS;
+// Rompecabezas de escenarios: el grafo, el estado actual y las transiciones.
+window.SANPABLERA.getStagePuzzle = () => STAGE_PUZZLE;
+window.SANPABLERA.validarStagePuzzle = () => validatePuzzle();
+window.SANPABLERA.getPuzzleEstado = () => estadoPuzzle;
+window.SANPABLERA.ACTION_TRIGGER = ACTION_TRIGGER;
+window.SANPABLERA.PROP_CATALOG = PROP_CATALOG;
+window.SANPABLERA.registrarOccluder = registrarOccluder;
+window.SANPABLERA.describePropCode = describePropCode;
+window.SANPABLERA.makeScenarioProp = makeScenarioProp;
+window.SANPABLERA.resolverTransicionEscenario = (trigger, ctx = {}) => {
+    const actual = estadoPuzzle || createPuzzleState({});
+    return resolveStageTransition(actual.currentNode, trigger,
+        { ...ctx, currentNode: actual.currentNode, flags: actual.flags });
+};
+window.SANPABLERA.transicionesDisponibles = (ctx = {}) => {
+    const actual = estadoPuzzle || createPuzzleState({});
+    return availableStageTransitions(actual.currentNode,
+        { ...ctx, currentNode: actual.currentNode, flags: actual.flags });
+};
+window.SANPABLERA.viajarPorAccion = (trigger, ctx) => viajarPorAccion(trigger, ctx);
 window.SANPABLERA.elegirHito = (id) => elegirHito(id);
 window.SANPABLERA.entrarAlRing = entrarAlRing;
 window.SANPABLERA.textoSesion = () => ({

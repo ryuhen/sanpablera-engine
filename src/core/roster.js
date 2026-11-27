@@ -32,11 +32,13 @@
  * ============================================================================
  */
 import { customRosterSlot } from './CustomFighter.js';
+import { bodyTypeOf, genderOf } from './bodyTypes.js';
 
 export const ROSTER = [
     {
         id: 'PEDRO', name: 'Pedro Pérez', tag: 'El vecino invicto',
         characterId: 'PEDRO', archetype: 'YUGO',
+        gender: 'M', bodyType: 'MESOMORFO', height: 1.76, mass: 1.00, reach: 1.00,
         rgb: [0.30, 0.55, 1.00], hex: '#4d8cff',
         story: 'Del gimnasio de la esquina al callejón. Empezó como boxeador; en el puerto aprendió las patadas de los savateros, en el suelo le enseñaron a cerrar sumisiones y, cuando la pelea se pone fea, saca la botella. Movilidad de sobra: el que se mueve, vive.',
         style: 'Boxeo → patadas → suelo → botella'
@@ -44,6 +46,7 @@ export const ROSTER = [
     {
         id: 'JUAN', name: 'Juan García', tag: 'El que no se raja',
         characterId: 'JUAN', archetype: 'MUSASHI',
+        gender: 'M', bodyType: 'ENDOMORFO', height: 1.74, mass: 1.08, reach: 0.98,
         rgb: [0.90, 0.35, 0.30], hex: '#e6594d',
         story: 'Del gremio de carniceros del mercado. No golpea: cuelga. Garfios, proyecciones y un remate que no perdona. Judo de base: lento de pies, imposible de levantar una vez que te tiene.',
         style: 'Lucha · garfios y proyecciones (judo)'
@@ -51,6 +54,7 @@ export const ROSTER = [
     {
         id: 'JOSE', name: 'José López', tag: 'El de la esquina',
         characterId: null, archetype: 'MONTE',
+        gender: 'M', bodyType: 'ECTOMORFO', height: 1.78, mass: 0.94, reach: 1.03,
         rgb: [0.95, 0.87, 0.55], hex: '#f2de8c',
         story: 'Bailarín de capoeira reconvertido a pelea callejera: gira, esquiva y solo golpea cuando ya estás donde antes no estabas. El más móvil de los ocho: saltos múltiples y cuadrupedia sin aviso.',
         style: 'Capoeira · movilidad extrema · saltos y cuadrupedia'
@@ -58,6 +62,7 @@ export const ROSTER = [
     {
         id: 'MARIA', name: 'María González', tag: 'La que siempre llega',
         characterId: null, archetype: 'YUGO',
+        gender: 'F', bodyType: 'MESOMORFO', height: 1.76, mass: 1.00, reach: 1.00,
         rgb: [0.55, 0.55, 0.55], hex: '#8c8c8c',
         story: 'Ex bombera. Codos y rodillas en el clinch; quema el aire antes de quemarte. Donde ella llega, la pelea ya terminó.',
         style: 'Muay thai · clinch · golpeo ágil'
@@ -65,6 +70,7 @@ export const ROSTER = [
     {
         id: 'JOHN', name: 'John Doe', tag: 'El desconocido que gana',
         characterId: null, archetype: 'MUSASHI',
+        gender: 'M', bodyType: 'ECTOMORFO', height: 1.78, mass: 0.94, reach: 1.03,
         rgb: [0.15, 0.70, 0.45], hex: '#26b373',
         story: 'Nadie sabe de dónde sale. Del mercado de pulgas: palo, cuchillo y lo que encuentre. Distancia larga, cortes cortos. El vagabundo que convierte cualquier objeto en arma.',
         style: 'Kali · kenjutsu improvisado · arma blanca'
@@ -72,6 +78,7 @@ export const ROSTER = [
     {
         id: 'JANE', name: 'Jane Doe', tag: 'La anónima de oro',
         characterId: null, archetype: 'MUSASHI',
+        gender: 'F', bodyType: 'ENDOMORFO', height: 1.74, mass: 1.08, reach: 0.98,
         rgb: [0.55, 0.30, 0.85], hex: '#8c4dd9',
         story: 'Heredera de una escuela de lanzas de feria: la vara como estilo de espada, todo es alcance, todo es punta. Te ve antes de que la veas.',
         style: 'Lanza · vara (kenjutsu improvisado) · alcance'
@@ -79,6 +86,7 @@ export const ROSTER = [
     {
         id: 'CARLOS', name: 'Carlos Ruiz', tag: 'El primo de la final',
         characterId: null, archetype: 'MUSASHI',
+        gender: 'M', bodyType: 'ENDOMORFO', height: 1.74, mass: 1.08, reach: 0.98,
         rgb: [0.10, 0.45, 0.45], hex: '#1a7373',
         story: 'No sube al ring: te lleva al suelo y allí se queda. Judo de base, BJJ de oficio: cuanto más tiempo pasa, peor estás.',
         style: 'BJJ · judo · suelo y sumisión'
@@ -86,6 +94,7 @@ export const ROSTER = [
     {
         id: 'ANA', name: 'Ana Torres', tag: 'La última en pie',
         characterId: null, archetype: 'MONTE',
+        gender: 'F', bodyType: 'ECTOMORFO', height: 1.78, mass: 0.94, reach: 1.03,
         rgb: [0.95, 0.60, 0.15], hex: '#f29a26',
         story: 'Pintora de grafiti y peleadora de plaza: no tiene escuela, tiene instinto salvaje. Cada pelea inventa un movimiento nuevo: gira, salta y repta sin aviso.',
         style: 'Calle · improvisación · acrobacia'
@@ -105,6 +114,14 @@ export function fullRoster() {
         ? ROSTER.find((s) => s.characterId === custom.characterId)
         : null;
     custom.archetype = base ? base.archetype : null;
+    // El peleador del jugador hereda tipologia del base si existe; si no, mesomorfo.
+    const bt = bodyTypeOf(base?.bodyType || custom.bodyType || 'MESOMORFO');
+    const g = genderOf(custom.gender || base?.gender || 'M');
+    custom.gender = g.id;
+    custom.bodyType = bt.id;
+    custom.height = bt.height;
+    custom.mass = bt.mass;
+    custom.reach = bt.reach;
     return [...ROSTER, custom];
 }
 
@@ -112,5 +129,7 @@ export function fullRoster() {
 export function rosterSlot(id) {
     return fullRoster().find(s => s.id === id) || ROSTER[0];
 }
+
+export { GENERATED_CHARACTERS, SOMATOTYPES, SOMATOTYPE_LIST, createCharacter } from './bodyTypes.js';
 
 export default ROSTER;

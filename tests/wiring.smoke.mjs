@@ -38,7 +38,9 @@ for (const [nombre, ruta] of [
     ['sesion', "./modes/session.js"],
     ['geografia de la maqueta', "./geo/diorama.js"],
     ['render de la maqueta', "../render/Diorama.js"],
-    ['cel-shading', "../render/ToonMaterial.js"]
+    ['cel-shading', "../render/ToonMaterial.js"],
+    ['guiones de intro', "./cine/fighterIntros.js"],
+    ['rompecabezas de escenarios', "./narrative/stagePuzzle.js"]
 ]) {
     check('importa ' + nombre, tiene("from '" + ruta + "'"));
 }
@@ -56,7 +58,21 @@ for (const [nombre, texto] of [
     ['el zoom de la maqueta manda en la camara', 'if (camaraMaqueta) {'],
     ['la maqueta congela el combate', 'if (enMaqueta) {'],
     ['se puede salir de la maqueta', 'function entrarAlRing()'],
-    ['la sesion se publica para depurar', 'getSesion']
+    ['la sesion se publica para depurar', 'getSesion'],
+    ['la carga se mantiene durante los modelos', 'holdUntilDone: true'],
+    ['la barra avanza dentro de la fase lenta', 'loading.setProgress('],
+    ['se marca la fase de luchadores', "loading.step('luchadores')"],
+    ['se marca la fase de interfaz', "loading.step('interfaz')"],
+    ['la barra se cierra al terminar', "loading.step('listo');"],
+    ['la pantalla se retira al terminar', 'loading.dismiss();'],
+    ['los intros se validan con los clips reales', 'validateIntros('],
+    ['los intros se pueden consultar', 'getFighterIntros'],
+    ['el puzzle se valida al arrancar', 'validatePuzzle()'],
+    ['el puzzle arranca en el escenario elegido', 'fijarNodoPuzzle(stage.id)'],
+    ['el puzzle arranca en el hito elegido', 'fijarNodoPuzzle(id);'],
+    ['el puzzle sigue los cambios de campana', 'if (id) fijarNodoPuzzle(id);'],
+    ['una accion puede mover la pelea de lugar', 'function viajarPorAccion('],
+    ['el puzzle se publica para depurar', 'getStagePuzzle']
 ]) {
     check(nombre, tiene(texto), texto);
 }
@@ -183,6 +199,43 @@ for (const [nombre, texto] of [
     for (const k of ['locoPose', 'attackPose', 'posturePose']) {
         check('FighterRig.default exporta ' + k, typeof R.default[k] === 'function');
     }
+}
+
+section('7 · Tipologias, escenarios, intros y pantalla de carga');
+{
+    const B = await load('src/core/bodyTypes.js');
+    for (const k of ['SOMATOTYPES', 'SOMATOTYPE_LIST', 'GENDERS', 'bodyTypeOf',
+        'genderOf', 'scalePartTable', 'createCharacter', 'GENERATED_CHARACTERS']) {
+        check('bodyTypes exporta ' + k, B[k] !== undefined);
+    }
+    const E = await load('src/core/stages.js');
+    check('stages exporta nueve de historia mas el dojo',
+        E.STAGES.length === 10, E.STAGES.length);
+    for (const k of ['FIGHT_STAGES', 'NARRATIVE_STAGES', 'stageById',
+        'stagesByZone', 'stageByLugar']) {
+        check('stages exporta ' + k, E[k] !== undefined);
+    }
+    const I = await load('src/core/cine/fighterIntros.js');
+    check('fighterIntros exporta FIGHTER_INTROS', !!I.FIGHTER_INTROS);
+    for (const k of ['introForFighter', 'listIntroBeats', 'validateIntros']) {
+        check('fighterIntros exporta ' + k, typeof I[k] === 'function');
+    }
+    const P = await load('src/core/narrative/stagePuzzle.js');
+    check('stagePuzzle exporta el grafo', !!P.STAGE_PUZZLE);
+    for (const k of ['validatePuzzle', 'getNode', 'createPuzzleState',
+        'resolveTransition', 'applyTransition', 'availableTransitions']) {
+        check('stagePuzzle exporta ' + k, typeof P[k] === 'function');
+    }
+    check('el grafo del puzzle esta sano', P.validatePuzzle().length === 0, P.validatePuzzle());
+
+    const LS = await load('src/ui/LoadingScreen.js');
+    for (const k of ['_bindPlay', '_hit', '_tickPlay', '_renderPlay', 'dismiss']) {
+        check('LoadingScreen implementa ' + k, typeof LS.LoadingScreen.prototype[k] === 'function');
+    }
+    const fuente = await readFile('src/ui/LoadingScreen.js', 'utf8');
+    check('el calentamiento no escribe en el progreso',
+        fuente.indexOf('_renderPlay()') > 0 && !fuente.includes('this.progress = this._play'));
+    check('el calentamiento se pinta en el DOM', fuente.includes('class="spl-play"'));
 }
 
 console.log('\n' + '='.repeat(64));

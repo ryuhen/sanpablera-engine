@@ -41,6 +41,13 @@
  *    (fullscreen + arranque). En movil se pide ademas el bloqueo a horizontal
  *    dentro del fullscreen; si el navegador no lo permite (iOS, por ejemplo) se
  *    arranca igualmente y no se bloquea al jugador con un error.
+ *
+ * 7. HAY ALGO QUE HACER MIENTRAS CARGA. Tres dianas ("calentamiento") aparecen
+ *    solas y se golpean con ratón, dedo o J/K/L. Es COSMETICO: suma puntos, no
+ *    adelanta la barra ni abre el juego antes de tiempo. Con `holdUntilDone` la
+ *    pantalla sobrevive al gesto de fullscreen y el motor la retira con
+ *    `dismiss()` cuando los modelos y los clips ya estan listos, que es cuando
+ *    antes no se veia nada y el jugador solo esperaba.
  * ============================================================================
  */
 
@@ -420,6 +427,88 @@ const CSS = `
     opacity: .9;
 }
 
+/* CALENTAMIENTO: tres dianas que aparecen solas mientras carga. Es cosmético:
+   suma puntos, NO adelanta el progreso ni permite empezar antes. Así el jugador
+   tiene algo que hacer durante la fase lenta (modelos y clips) sin que la barra
+   mienta. Va debajo de la barra y por encima del muro, con el mismo aire SFII. */
+#sanpablera-loading .spl-play {
+    position: relative;
+    z-index: 2;
+    width: min(86vw, 620px);
+    border: 3px solid ${PALETTE.ink};
+    background: rgba(3, 9, 30, .76);
+    box-shadow: 5px 5px 0 ${PALETTE.outline};
+    padding: clamp(8px, 1.5vh, 14px) clamp(10px, 2vw, 18px);
+    transform: skewX(-4deg);
+    pointer-events: auto;
+}
+#sanpablera-loading .spl-play-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: clamp(6px, 1vh, 10px);
+    font-family: 'Arial Black', Impact, system-ui, sans-serif;
+    font-size: clamp(9px, 1.9vh, 12px);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+#sanpablera-loading .spl-play-title { color: #fff3b0; text-shadow: 2px 2px 0 #001038; }
+#sanpablera-loading .spl-play-score { color: ${PALETTE.hud}; min-width: 16ch; text-align: right; }
+#sanpablera-loading .spl-lanes {
+    display: flex;
+    justify-content: center;
+    gap: clamp(6px, 1.4vw, 12px);
+}
+#sanpablera-loading .spl-lane {
+    position: relative;
+    width: clamp(56px, 13vw, 104px);
+    height: clamp(38px, 7vh, 58px);
+    border: 3px solid ${PALETTE.ink};
+    border-radius: 0;
+    background: linear-gradient(180deg, #24336b 0%, #0a1230 100%);
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, .55);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transform: skewX(3deg);
+}
+#sanpablera-loading .spl-lane:focus-visible { outline: 3px dashed #fff; outline-offset: 3px; }
+#sanpablera-loading .spl-lane i {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: clamp(18px, 4vw, 30px);
+    aspect-ratio: 1;
+    border: 3px solid #fff;
+    border-radius: 50%;
+    background: #5a6da8;
+    transform: translate(-50%, -50%) scale(.82);
+    transition: transform .08s steps(2), background .08s linear;
+}
+#sanpablera-loading .spl-lane kbd {
+    position: absolute;
+    right: 5px; bottom: 3px;
+    font: 700 clamp(8px, 1.6vh, 11px) ui-monospace, Menlo, Consolas, monospace;
+    color: #9db9ff;
+}
+#sanpablera-loading .spl-lane.on i {
+    background: #ffd447;
+    box-shadow: 0 0 14px #ffd447, 0 0 0 4px rgba(255, 45, 111, .55);
+    transform: translate(-50%, -50%) scale(1.18);
+    animation: splBlink .45s steps(2) infinite;
+}
+#sanpablera-loading .spl-lane.hit { background: linear-gradient(180deg, #ff5d47 0%, #a11710 100%); }
+#sanpablera-loading .spl-lane.hit i { background: #fff; transform: translate(-50%, -50%) scale(1.5); }
+#sanpablera-loading .spl-lane.miss { filter: grayscale(.85); }
+#sanpablera-loading .spl-play-hint {
+    margin: clamp(6px, 1vh, 9px) 0 0;
+    text-align: center;
+    font: 700 clamp(9px, 1.8vh, 11px) ui-monospace, Menlo, Consolas, monospace;
+    letter-spacing: 1px;
+    color: #9db9ff;
+}
+@keyframes splBlink { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.6); } }
+
 /* MOVIL: la pantalla es pequena y el pulgar tapa el centro, asi que el muro
    sube y la barra baja. */
 @media (max-width: 560px), (orientation: portrait) {
@@ -429,6 +518,7 @@ const CSS = `
 
 @media (prefers-reduced-motion: reduce) {
     #sanpablera-loading .spl-start { animation: none; }
+    #sanpablera-loading .spl-lane.on i { animation: none; }
 }
 `;
 
@@ -467,6 +557,9 @@ export class LoadingScreen {
      *        se llama cuando el jugador ya ha pulsado y la pantalla se va
      * @param {string[]} [opts.steps]    claves de las fases, en orden
      * @param {boolean} [opts.fullscreen=true] pedir pantalla completa al empezar
+     * @param {boolean} [opts.holdUntilDone=false] no retirar la pantalla al
+     *        pulsar: el motor la cierra con `dismiss()` tras cargar los modelos
+     * @param {() => number} [opts.rng]  fuente de azar del calentamiento (tests)
      */
     constructor(opts = {}) {
         this.opts = opts;
@@ -483,7 +576,10 @@ export class LoadingScreen {
         this.ready = false;
         this.started = false;
         this.destroyed = false;
+        this.dismissed = false;
         this.fullscreenOk = false;
+        this.holdUntilDone = !!opts.holdUntilDone;
+        this.rng = typeof opts.rng === 'function' ? opts.rng : Math.random;
         this._tags = [];            // tags construidos en el DOM
         this._uid = 0;              // contador de ids unicos (degradados/clip)
         this._raf = 0;
@@ -495,6 +591,16 @@ export class LoadingScreen {
         // pantalla se monta por encima de todo y se quita de un tiron.
         this.postal = montarPostal({ destino: opts.destino || null });
         this._startedPromise = new Promise((resolve) => { this._resolveStarted = resolve; });
+        // Calentamiento: estado puro, sin tocar la carga real. Cada carril tiene
+        // su propio temporizador para que no aparezcan los tres a la vez.
+        this._play = {
+            lanes: [0.35, 0.8, 1.25].map((next) => ({
+                next, active: false, life: 0, flash: 0, miss: 0
+            })),
+            score: 0, combo: 0, hits: 0, misses: 0
+        };
+        this._onPlayKey = null;      // se crea en _bindPlay (cierra sobre las dianas)
+        this._onLaneClicks = [];
 
         this._injectStyle();
         this._buildDom();
@@ -543,6 +649,18 @@ export class LoadingScreen {
                 <span class="spl-pct" id="splPct">0%</span>
                 <span class="spl-label" id="splLabel">${this.steps[0].label}</span>
             </div>
+            <div class="spl-play" id="splPlay" aria-label="Calentamiento mientras carga">
+                <div class="spl-play-head">
+                    <span class="spl-play-title" id="splPlayTitle">Calienta antes de pelear</span>
+                    <span class="spl-play-score" id="splScore" aria-live="polite">0 puntos · x1</span>
+                </div>
+                <div class="spl-lanes" id="splLanes">
+                    <button class="spl-lane" type="button" data-lane="0" aria-label="Diana 1, tecla J"><i></i><kbd>J</kbd></button>
+                    <button class="spl-lane" type="button" data-lane="1" aria-label="Diana 2, tecla K"><i></i><kbd>K</kbd></button>
+                    <button class="spl-lane" type="button" data-lane="2" aria-label="Diana 3, tecla L"><i></i><kbd>L</kbd></button>
+                </div>
+                <p class="spl-play-hint" id="splPlayHint">Toca las dianas o pulsa J / K / L</p>
+            </div>
             <button class="spl-start" id="splStart" type="button" hidden></button>
             <p class="spl-hint" id="splHint" hidden></p>
         `;
@@ -559,6 +677,11 @@ export class LoadingScreen {
         this.label = root.querySelector('#splLabel');
         this.startButton = root.querySelector('#splStart');
         this.hint = root.querySelector('#splHint');
+        this.playRoot = root.querySelector('#splPlay');
+        this.playTitle = root.querySelector('#splPlayTitle');
+        this.score = root.querySelector('#splScore');
+        this.playHint = root.querySelector('#splPlayHint');
+        this.laneEls = Array.from(root.querySelectorAll('.spl-lane'));
     }
 
     /**
@@ -816,6 +939,107 @@ export class LoadingScreen {
             }
         };
         document.addEventListener('visibilitychange', this._onVisibility);
+        this._bindPlay();
+    }
+
+    /**
+     * Calentamiento: las dianas se golpean con puntero o con J/K/L. Se escucha
+     * en window (no en cada boton) para que funcione aunque el foco este en otra
+     * parte de la pantalla de carga. Las teclas del boton de arranque (Enter y
+     * espacio) NO se tocan: ahí sigue mandando el navegador.
+     */
+    _bindPlay() {
+        const LANAS = { KeyJ: 0, KeyK: 1, KeyL: 2, Digit1: 0, Digit2: 1, Digit3: 2 };
+        this._onPlayKey = (ev) => {
+            if (this.destroyed || this.dismissed || ev.repeat) return;
+            if (ev.ctrlKey || ev.altKey || ev.metaKey) return;
+            const i = LANAS[ev.code];
+            if (i === undefined) return;
+            ev.preventDefault();
+            this._hit(i);
+        };
+        window.addEventListener('keydown', this._onPlayKey);
+
+        this.laneEls.forEach((el, i) => {
+            const fn = (ev) => { ev.preventDefault(); this._hit(i); };
+            el.addEventListener('click', fn);
+            this._onLaneClicks.push(fn);
+        });
+    }
+
+    /** Golpea un carril. Acierto suma y aclara la racha; fallo solo la corta. */
+    _hit(i) {
+        const lane = this._play.lanes[i];
+        if (!lane) return;
+        const el = this.laneEls[i];
+        if (lane.active) {
+            this._play.combo += 1;
+            this._play.hits += 1;
+            this._play.score += 10 + Math.min(this._play.combo, 10) * 2;
+            lane.active = false;
+            lane.life = 0;
+            lane.flash = 0.2;
+            lane.next = 0.35 + this.rng() * 0.8;
+            // Sin esto la diana se quedaria encendida para siempre: _tickPlay
+            // solo apaga `on` cuando la diana expira, no cuando se acierta.
+            if (el) { el.classList.remove('on'); el.classList.add('hit'); }
+        } else {
+            this._play.combo = 0;
+            this._play.misses += 1;
+            lane.miss = 0.18;
+            if (el) el.classList.add('miss');
+        }
+        this._renderPlay();
+    }
+
+    /** Avanza las dianas; lo llama el mismo rAF que pinta el muro. */
+    _tickPlay(dt) {
+        if (this.dismissed || this.destroyed) return;
+        const s = dt / 1000;
+        for (let i = 0; i < this._play.lanes.length; i++) {
+            const lane = this._play.lanes[i];
+            const el = this.laneEls[i];
+            if (!el) continue;
+
+            if (lane.flash > 0) {
+                lane.flash -= s;
+                if (lane.flash <= 0) el.classList.remove('hit');
+            }
+            if (lane.miss > 0) {
+                lane.miss -= s;
+                if (lane.miss <= 0) el.classList.remove('miss');
+            }
+            if (lane.active) {
+                lane.life -= s;
+                if (lane.life <= 0) {
+                    lane.active = false;
+                    lane.next = 0.4 + this.rng() * 0.7;
+                    el.classList.remove('on');
+                    this._play.combo = 0;
+                    this._renderPlay();
+                }
+            } else {
+                lane.next -= s;
+                if (lane.next <= 0) {
+                    lane.active = true;
+                    lane.life = 0.75 + this.rng() * 0.45;
+                    el.classList.add('on');
+                }
+            }
+        }
+    }
+
+    /** Pinta marcador y frases de la racha. Nunca escribe en `progress`. */
+    _renderPlay() {
+        if (!this.score) return;
+        const c = this._play.combo;
+        this.score.textContent = this._play.score + ' puntos · x' + Math.max(1, c);
+        if (c >= 8) this.playTitle.textContent = '¡MANOS DE FUEGO!';
+        else if (c >= 4) this.playTitle.textContent = 'RACHA CALIENTE';
+        else this.playTitle.textContent = 'Calienta antes de pelear';
+        this.playHint.textContent = this._play.hits
+            ? this._play.hits + ' golpes · ' + this._play.misses + ' fallos'
+            : 'Toca las dianas o pulsa J / K / L';
     }
 
     // =========================================================================
@@ -832,10 +1056,11 @@ export class LoadingScreen {
         if (index === -1) index = this.stepIndex;
         // Puede llamarse dos veces la misma fase (p. ej. un recalentado): no
         // se cuenta doble.
-        while (this.stepIndex < index) {
-            this.doneWeight += this.steps[this.stepIndex].weight;
-            this.stepIndex++;
-        }
+        while (this.stepIndex < index) this.stepIndex++;
+        // Recalcular desde la base (en vez de sumar) evita contar dos veces el
+        // avance parcial que setProgress() pudo escribir dentro de la fase que
+        // ahora se cierra. "listo" es la ultima fase: ahi se cierra al 100%.
+        this.doneWeight = key === 'listo' ? this.totalWeight : this._baseWeight();
         this._refreshProgress();
         this.label.textContent = this.steps[Math.min(this.stepIndex, this.steps.length - 1)].label;
         return this.progress;
@@ -874,10 +1099,20 @@ export class LoadingScreen {
     finish(autoStart = false) {
         if (this.ready) return;
         this.ready = true;
-        this.progress = 1;
-        this.doneWeight = this.totalWeight;
-        this._refreshProgress();
-        this.label.textContent = 'Listo';
+        if (this.holdUntilDone) {
+            // Aqui solo ha terminado la antesala: despues del gesto todavia
+            // quedan los .glb y los clips. Marcar 100% "/ Listo" ahora mentiria
+            // y ademas impediria que la barra avance (el progreso no retrocede).
+            // boot() cierra la fase final con step('listo') antes de dismiss().
+            this.doneWeight = this._baseWeight();
+            this._refreshProgress();
+            this.label.textContent = 'Pulsa para jugar';
+        } else {
+            this.progress = 1;
+            this.doneWeight = this.totalWeight;
+            this._refreshProgress();
+            this.label.textContent = 'Listo';
+        }
 
         const touchy = matchMedia('(pointer: coarse)').matches;
         this.startButton.textContent = touchy ? 'Toca para jugar' : 'Pulsa para jugar';
@@ -918,14 +1153,40 @@ export class LoadingScreen {
             if (this.fullscreenOk) await Fullscreen.lockLandscape();
         }
 
-        this.root.classList.add('spl-leaving');
-        const done = () => this.destroy();
-        // Se espera a que termine el fundido antes de quitar el nodo: si se
-        // quita de golpe, en muchos moviles aparece un destello blanco.
-        setTimeout(done, 480);
+        // Con `holdUntilDone` el gesto solo desbloquea el arranque: la pantalla
+        // sigue visible (y el calentamiento sigue jugable) mientras el motor
+        // carga modelos y clips. El propio motor la cierra con `dismiss()`.
+        if (this.holdUntilDone) {
+            this.startButton.hidden = true;
+            this.root.classList.add('spl-held');
+            // El gesto ya esta hecho: lo que viene son los .glb. Dejar el
+            // cartel pidiendo que se pulse mientras la barra avanza confunde.
+            const faseLuchadores = this.steps.find((s) => s.key === 'luchadores');
+            if (faseLuchadores) this.label.textContent = faseLuchadores.label;
+        } else {
+            this.root.classList.add('spl-leaving');
+            const done = () => this.destroy();
+            // Se espera a que termine el fundido antes de quitar el nodo: si se
+            // quita de golpe, en muchos moviles aparece un destello blanco.
+            setTimeout(done, 480);
+        }
         if (this.opts.onStart) this.opts.onStart({ fullscreen: this.fullscreenOk });
         this._resolveStarted({ fullscreen: this.fullscreenOk });
         return this.fullscreenOk;
+    }
+
+    /**
+     * Cierra la pantalla cuando el motor termina de cargar. Solo tiene efecto
+     * si se abrio con `holdUntilDone`: en el arranque normal `start()` ya la
+     * retiro, y llamar a esto de nuevo no hace nada.
+     */
+    dismiss() {
+        if (!this.started || this.dismissed || this.destroyed) return false;
+        this.dismissed = true;
+        this.root.classList.remove('spl-held');
+        this.root.classList.add('spl-leaving');
+        setTimeout(() => this.destroy(), 480);
+        return true;
     }
 
     destroy() {
@@ -937,6 +1198,12 @@ export class LoadingScreen {
         window.removeEventListener('resize', this._onResize);
         window.removeEventListener('orientationchange', this._onResize);
         this.startButton.removeEventListener('click', this._onStartClick);
+        if (this._onPlayKey) window.removeEventListener('keydown', this._onPlayKey);
+        this.laneEls.forEach((el, i) => {
+            const fn = this._onLaneClicks[i];
+            if (fn) el.removeEventListener('click', fn);
+        });
+        this._onLaneClicks = [];
         if (this.root && this.root.parentNode) this.root.parentNode.removeChild(this.root);
         const style = document.getElementById(STYLE_ID);
         if (style && style.parentNode) style.parentNode.removeChild(style);
@@ -969,6 +1236,7 @@ export class LoadingScreen {
         }
 
         this._paint(dt);
+        this._tickPlay(dt);
     }
 
     /**
